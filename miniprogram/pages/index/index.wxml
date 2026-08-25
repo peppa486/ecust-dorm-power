@@ -1,10 +1,9 @@
 <view class="page index-page">
   <view class="hero">
     <view class="brand-line">
-      <text class="brand">宿电</text>
-      <text class="brand-badge">ECUST</text>
+      <text class="brand">华理宿舍电量查询</text>
     </view>
-    <text class="hero-subtitle">寝室剩余电量</text>
+    <text class="hero-subtitle">查询寝室剩余电量</text>
   </view>
 
   <view class="surface query-card">

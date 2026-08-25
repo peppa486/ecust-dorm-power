@@ -1,5 +1,5 @@
 {
-  "description": "ECUST Dorm Power Mini Program",
+  "description": "华理宿舍电量查询微信小程序",
   "miniprogramRoot": "miniprogram/",
   "compileType": "miniprogram",
   "setting": {
@@ -10,5 +10,5 @@
     "minified": true
   },
   "appid": "touristappid",
-  "projectname": "ecust-dorm-power"
+  "projectname": "华理宿舍电量查询"
 }

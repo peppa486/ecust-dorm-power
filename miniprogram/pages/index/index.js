@@ -255,10 +255,10 @@ Page({
   },
 
   onShareAppMessage() {
-    return { title: '宿电｜华理寝室电量', path: '/pages/index/index' }
+    return { title: '华理宿舍电量查询', path: '/pages/index/index' }
   },
 
   onShareTimeline() {
-    return { title: '宿电｜华理寝室电量' }
+    return { title: '华理宿舍电量查询' }
   }
 })
