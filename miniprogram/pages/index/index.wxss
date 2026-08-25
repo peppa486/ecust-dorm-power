@@ -19,23 +19,6 @@
   letter-spacing: -3rpx;
 }
 
-.brand-badge {
-  padding: 7rpx 11rpx 6rpx;
-  border-radius: 9rpx;
-  background: #1c1f24;
-  color: #fff;
-  font-size: 18rpx;
-  font-weight: 700;
-  letter-spacing: 1rpx;
-}
-
-.hero-subtitle {
-  display: block;
-  margin-top: 16rpx;
-  color: #9297a0;
-  font-size: 25rpx;
-}
-
 .query-card,
 .result-card,
 .reminder-card {

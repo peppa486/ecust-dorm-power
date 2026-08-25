@@ -88,11 +88,6 @@
   font-weight: 700;
 }
 
-.chart-caption {
-  color: #a0a5ad;
-  font-size: 21rpx;
-}
-
 .trend-canvas {
   display: block;
   width: 100%;

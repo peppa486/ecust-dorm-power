@@ -17,8 +17,7 @@
 
   <view class="surface chart-card" wx:if="{{chartReady}}">
     <view class="chart-head">
-      <text class="chart-title">最近 7 天</text>
-      <text class="chart-caption">每小时采样</text>
+      <text class="chart-title">近7天</text>
     </view>
     <canvas type="2d" id="trendCanvas" class="trend-canvas"></canvas>
   </view>
