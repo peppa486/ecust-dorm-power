@@ -81,22 +81,35 @@
 }
 
 .field-value {
+  position: relative;
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  padding-right: 54rpx;
   white-space: nowrap;
   overflow: hidden;
 }
 
+.field-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .chevron {
-  margin-left: 8rpx;
-  color: #a0a5ad;
-  font-size: 30rpx;
+  position: absolute;
+  top: 50%;
+  right: 22rpx;
+  box-sizing: border-box;
+  width: 14rpx;
+  height: 14rpx;
+  border: solid #a0a5ad;
+  border-width: 0 2rpx 2rpx 0;
+  transform: translateY(-62%) rotate(45deg);
 }
 
 .primary-btn,
-.soft-btn,
-.text-btn {
+.soft-btn {
   box-sizing: border-box;
   min-height: 82rpx;
   border-radius: 18rpx;
@@ -128,18 +141,21 @@
   color: #24272b;
 }
 
-.text-btn {
-  width: 120rpx;
-  background: transparent;
-  color: #9a9fa7;
-}
-
 .result-top,
 .section-head,
 .result-actions,
 .reminder-actions {
   display: flex;
   align-items: center;
+}
+
+.result-actions {
+  gap: 16rpx;
+}
+
+.cancel-btn {
+  color: #6f747b;
+  font-size: 25rpx;
 }
 
 .result-top,

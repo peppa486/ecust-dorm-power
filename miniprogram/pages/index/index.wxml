@@ -20,7 +20,10 @@
       <view class="field-block">
         <text class="field-label">楼栋</text>
         <picker mode="selector" range="{{buildings}}" range-key="label" value="{{buildingIndex}}" bindchange="onBuildingChange">
-          <view class="field-value tap">{{buildings[buildingIndex].label || '选择楼栋'}}<text class="chevron">⌄</text></view>
+          <view class="field-value tap">
+            <text class="field-text">{{buildings[buildingIndex].label || '选择楼栋'}}</text>
+            <view class="chevron" aria-hidden="true"></view>
+          </view>
         </picker>
       </view>
       <view class="field-block">
@@ -50,7 +53,7 @@
     <view class="result-actions">
       <button class="soft-btn tap" wx:if="{{!isMine}}" loading="{{saving}}" disabled="{{saving}}" bindtap="setMine">设为我的寝室</button>
       <button class="soft-btn tap" wx:else bindtap="goHistory">查看趋势</button>
-      <button class="text-btn tap" wx:if="{{isMine}}" bindtap="removeMine">取消</button>
+      <button class="soft-btn cancel-btn tap" wx:if="{{isMine}}" bindtap="removeMine">取消我的寝室</button>
     </view>
   </view>
 
