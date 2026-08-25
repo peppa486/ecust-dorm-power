@@ -1,0 +1,78 @@
+<view class="page index-page">
+  <view class="hero">
+    <view class="brand-line">
+      <text class="brand">宿电</text>
+      <text class="brand-badge">ECUST</text>
+    </view>
+    <text class="hero-subtitle">寝室剩余电量</text>
+  </view>
+
+  <view class="surface query-card">
+    <view class="segmented">
+      <view
+        wx:for="{{campuses}}"
+        wx:key="*this"
+        class="segment tap {{index === campusIndex ? 'segment-active' : ''}}"
+        data-index="{{index}}"
+        bindtap="onCampusTap"
+      >{{item}}</view>
+    </view>
+
+    <view class="field-grid">
+      <view class="field-block">
+        <text class="field-label">楼栋</text>
+        <picker mode="selector" range="{{buildings}}" range-key="label" value="{{buildingIndex}}" bindchange="onBuildingChange">
+          <view class="field-value tap">{{buildings[buildingIndex].label || '选择楼栋'}}<text class="chevron">⌄</text></view>
+        </picker>
+      </view>
+      <view class="field-block">
+        <text class="field-label">寝室</text>
+        <input class="room-input" maxlength="8" placeholder="202" value="{{room}}" bindinput="onRoomInput" />
+      </view>
+    </view>
+
+    <button class="primary-btn tap" loading="{{loading}}" disabled="{{loading}}" bindtap="queryPower">查询</button>
+  </view>
+
+  <view class="surface result-card" wx:if="{{result}}">
+    <view class="result-top">
+      <view>
+        <text class="result-caption">剩余电量</text>
+        <view class="power-value">{{result.kwh}}<text class="power-unit">度</text></view>
+      </view>
+      <view class="status-pill status-{{result.tone}}">
+        <view class="status-dot"></view>
+        <text>{{result.statusText}}</text>
+      </view>
+    </view>
+    <view class="result-meta">
+      <text>{{result.displayName}}</text>
+      <text> · {{result.cached ? '缓存' : '刚刚'}}</text>
+    </view>
+    <view class="result-actions">
+      <button class="soft-btn tap" wx:if="{{!isMine}}" loading="{{saving}}" disabled="{{saving}}" bindtap="setMine">设为我的寝室</button>
+      <button class="soft-btn tap" wx:else bindtap="goHistory">查看趋势</button>
+      <button class="text-btn tap" wx:if="{{isMine}}" bindtap="removeMine">取消</button>
+    </view>
+  </view>
+
+  <view class="surface reminder-card" wx:if="{{result && isMine}}">
+    <view class="section-head">
+      <view>
+        <text class="section-title">低电量提醒</text>
+        <text class="section-subtitle">{{watch.credits ? '可提醒 ' + watch.credits + ' 次' : '未订阅'}}</text>
+      </view>
+      <text class="threshold-number">{{threshold}}<text class="threshold-unit"> 度</text></text>
+    </view>
+    <slider min="5" max="40" step="1" value="{{threshold}}" activeColor="#1c1f24" backgroundColor="#e9ebee" block-color="#ffffff" block-size="24" bindchange="onThresholdChange" />
+    <view class="reminder-actions">
+      <button class="soft-btn tap" loading="{{saving}}" disabled="{{saving}}" bindtap="saveThreshold">保存阈值</button>
+      <button class="primary-btn small tap" loading="{{subscribing}}" disabled="{{subscribing}}" bindtap="subscribeLowPower">订阅一次提醒</button>
+    </view>
+  </view>
+
+  <view class="footer">
+    <text class="footer-link tap" bindtap="goAbout">关于</text>
+    <text>非官方工具</text>
+  </view>
+</view>

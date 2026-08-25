@@ -1,0 +1,14 @@
+{
+  "description": "ECUST Dorm Power Mini Program",
+  "miniprogramRoot": "miniprogram/",
+  "compileType": "miniprogram",
+  "setting": {
+    "urlCheck": false,
+    "es6": true,
+    "enhance": true,
+    "postcss": true,
+    "minified": true
+  },
+  "appid": "touristappid",
+  "projectname": "ecust-dorm-power"
+}

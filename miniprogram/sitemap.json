@@ -1,0 +1,4 @@
+{
+  "desc": "宿电",
+  "rules": [{ "action": "allow", "page": "*" }]
+}
