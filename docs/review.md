@@ -2,7 +2,8 @@
 
 ## 已验证
 
-- 36 个 Node 单元测试通过
+- 37 个 Node 单元测试通过
+- `node scripts/check-miniprogram.mjs` 通过，完成小程序 JS、JSON、WXML 与发布配置静态检查
 - 服务端与小程序 JavaScript 语法检查通过
 - Windows 与 CI 都可执行 `npm run check`
 - `npm run smoke` 启动服务并通过 `/health`

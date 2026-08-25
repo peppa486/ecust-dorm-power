@@ -40,7 +40,7 @@ curl -X POST http://127.0.0.1:8787/api/query \
   -d '{"campus":"奉贤","building":"5","room":"202"}'
 ```
 
-微信开发者工具导入仓库根目录。`miniprogram/utils/config.js` 中的 `API_ENV` 用于切换环境：本地联调保留 `development`，发布前改为 `production`，并将 `API_BASES.production` 改成自己的 HTTPS API 域名。`project.config.json` 中的 `appid` 是占位值，发布前替换为小程序 AppID；AppSecret 只放在服务端 `.env`，不要提交到 Git。
+微信开发者工具导入仓库根目录。当前发布配置使用 `production` 环境和 `https://power.ecust.cc`；如需本地联调，可临时切回 `development`，不要将本地地址上传审核。根目录 `project.config.json` 已配置正式小程序 AppID 和开启域名校验；AppSecret 只放在服务端 `.env`，不要提交到 Git。
 
 ## 微信配置
 
@@ -58,7 +58,7 @@ WECHAT_FIELD_TIP=thing3
 
 订阅模板字段名和电量字段类型以微信公众平台实际模板为准。`WECHAT_FIELD_ROOM` 可选；两字段模板可以留空，服务端会把寝室位置和用户设置的动态阈值合并到提示字段。推荐把“当前电量”配置为 `number` 类型。
 
-正式发布时把 `miniprogram/utils/config.js` 的 `API_ENV` 改为 `production`，在微信公众平台添加 HTTPS request 合法域名，并将开发者工具的 `urlCheck` 改为 `true`。
+正式发布前，在微信公众平台将 `power.ecust.cc` 添加为 HTTPS request 合法域名，并使用开启域名校验的开发者工具完成编译、预览和真机验收。
 
 ## 部署
 
