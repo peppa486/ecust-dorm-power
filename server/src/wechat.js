@@ -42,9 +42,13 @@ function requiredField(name) {
   return value
 }
 
+function optionalField(name) {
+  return String(process.env[name] || '').trim()
+}
+
 export function buildLowPowerData(watch, kwh) {
   if (!Number.isFinite(Number(kwh))) throw new Error('电量数据无效')
-  const roomField = requiredField('WECHAT_FIELD_ROOM')
+  const roomField = optionalField('WECHAT_FIELD_ROOM')
   const powerField = requiredField('WECHAT_FIELD_POWER')
   const tipField = requiredField('WECHAT_FIELD_TIP')
   const powerType = requiredField('WECHAT_FIELD_POWER_TYPE').toLowerCase()
@@ -54,17 +58,26 @@ export function buildLowPowerData(watch, kwh) {
     error.expose = true
     throw error
   }
-  if (new Set([roomField, powerField, tipField]).size !== 3) {
+  const configuredFields = [roomField, powerField, tipField].filter(Boolean)
+  if (new Set(configuredFields).size !== configuredFields.length) {
     const error = new Error('微信订阅模板字段不能重复')
     error.statusCode = 503
     error.expose = true
     throw error
   }
-  return {
-    [roomField]: { value: `${watch.campus}${buildingLabel(watch.campus, watch.building)} ${watch.room}`.slice(0, 20) },
+  const roomValue = `${watch.campus}${buildingLabel(watch.campus, watch.building)} ${watch.room}`.slice(0, 20)
+  const alertValue = `低于 ${watch.threshold} 度，请及时充值`
+  const compactAlertValue = `低于${watch.threshold}度请充值`
+  const compactRoomLength = Math.max(0, 20 - compactAlertValue.length - 1)
+  const combinedTipValue = compactRoomLength
+    ? `${roomValue.slice(0, compactRoomLength)} ${compactAlertValue}`
+    : compactAlertValue.slice(0, 20)
+  const data = {
     [powerField]: { value: (powerType === 'number' ? String(kwh) : `${kwh} 度`).slice(0, 20) },
-    [tipField]: { value: `低于 ${watch.threshold} 度，请及时充值`.slice(0, 20) }
+    [tipField]: { value: (roomField ? alertValue : combinedTipValue).slice(0, 20) }
   }
+  if (roomField) data[roomField] = { value: roomValue }
+  return data
 }
 
 async function sendRequest(accessToken, openid, watch, kwh, templateId) {

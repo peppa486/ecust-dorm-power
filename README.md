@@ -56,7 +56,7 @@ WECHAT_FIELD_POWER_TYPE=number
 WECHAT_FIELD_TIP=thing3
 ```
 
-订阅模板字段名和电量字段类型以微信公众平台实际模板为准，四个 `WECHAT_FIELD_*` 值都需要配置。推荐把“当前电量”配置为 `number` 类型。
+订阅模板字段名和电量字段类型以微信公众平台实际模板为准。`WECHAT_FIELD_ROOM` 可选；两字段模板可以留空，服务端会把寝室位置和用户设置的动态阈值合并到提示字段。推荐把“当前电量”配置为 `number` 类型。
 
 正式发布时把 `miniprogram/utils/config.js` 的 `API_ENV` 改为 `production`，在微信公众平台添加 HTTPS request 合法域名，并将开发者工具的 `urlCheck` 改为 `true`。
 

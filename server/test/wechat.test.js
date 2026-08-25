@@ -21,6 +21,31 @@ test('builds subscription fields from environment configuration', async () => {
   })
 })
 
+test('supports a two-field template while keeping the user threshold dynamic', async () => {
+  const original = {
+    room: process.env.WECHAT_FIELD_ROOM,
+    power: process.env.WECHAT_FIELD_POWER,
+    powerType: process.env.WECHAT_FIELD_POWER_TYPE,
+    tip: process.env.WECHAT_FIELD_TIP
+  }
+  process.env.WECHAT_FIELD_ROOM = ''
+  process.env.WECHAT_FIELD_POWER = 'character_string1'
+  process.env.WECHAT_FIELD_POWER_TYPE = 'character_string'
+  process.env.WECHAT_FIELD_TIP = 'thing3'
+  try {
+    const { buildLowPowerData } = await import('../src/wechat.js?two-fields')
+    assert.deepEqual(buildLowPowerData({ ...watch, threshold: 12 }, 8.5), {
+      character_string1: { value: '8.5 度' },
+      thing3: { value: '奉贤5号楼 202 低于12度请充值' }
+    })
+  } finally {
+    process.env.WECHAT_FIELD_ROOM = original.room
+    process.env.WECHAT_FIELD_POWER = original.power
+    process.env.WECHAT_FIELD_POWER_TYPE = original.powerType
+    process.env.WECHAT_FIELD_TIP = original.tip
+  }
+})
+
 test('concurrent sends share one access-token request', async () => {
   let tokenCalls = 0
   let sendCalls = 0
