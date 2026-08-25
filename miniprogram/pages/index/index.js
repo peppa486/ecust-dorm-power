@@ -20,10 +20,14 @@ Page({
 
   async onLoad() {
     this.ready = false
+    this.selectionByCampus = Object.create(null)
     const last = wx.getStorageSync('lastRoom') || null
     const lastCampusIndex = last?.campus ? this.data.campuses.indexOf(last.campus) : -1
     const campusIndex = lastCampusIndex >= 0 ? lastCampusIndex : this.data.campusIndex
-    if (lastCampusIndex >= 0) await this.setDataAsync({ campusIndex, room: last.room || '' })
+    if (lastCampusIndex >= 0) {
+      this.rememberSelection(last)
+      await this.setDataAsync({ campusIndex, room: last.room || '' })
+    }
     const restored = await this.loadBuildings(lastCampusIndex >= 0 ? last.building : '', campusIndex)
     await Promise.all([
       this.loadClientConfig(),
@@ -35,6 +39,14 @@ Page({
 
   setDataAsync(data) {
     return new Promise(resolve => this.setData(data, resolve))
+  },
+
+  rememberSelection(room) {
+    if (!room?.campus) return
+    this.selectionByCampus[room.campus] = {
+      building: room.building || '',
+      room: room.room || ''
+    }
   },
 
   onShow() {
@@ -80,16 +92,38 @@ Page({
   onCampusTap(e) {
     const index = Number(e.currentTarget.dataset.index)
     if (index === this.data.campusIndex) return
-    this.setData({ campusIndex: index, buildingIndex: 0, result: null, isMine: false })
-    this.loadBuildings('', index)
+    this.rememberSelection(this.currentRoom())
+    const campus = this.data.campuses[index]
+    const remembered = this.selectionByCampus[campus] || {}
+    this.setDataAsync({
+      campusIndex: index,
+      buildingIndex: 0,
+      room: remembered.room || '',
+      result: null,
+      isMine: false
+    }).then(() => this.loadBuildings(remembered.building, index))
   },
 
   onBuildingChange(e) {
-    this.setData({ buildingIndex: Number(e.detail.value), result: null, isMine: false })
+    const buildingIndex = Number(e.detail.value)
+    const option = this.data.buildings[buildingIndex]
+    this.rememberSelection({
+      campus: this.data.campuses[this.data.campusIndex],
+      building: option?.value || '',
+      room: this.data.room
+    })
+    this.setData({ buildingIndex, result: null, isMine: false })
   },
 
   onRoomInput(e) {
-    this.setData({ room: e.detail.value.trim().toUpperCase(), result: null, isMine: false })
+    const room = e.detail.value.trim().toUpperCase()
+    const option = this.data.buildings[this.data.buildingIndex]
+    this.rememberSelection({
+      campus: this.data.campuses[this.data.campusIndex],
+      building: option?.value || '',
+      room
+    })
+    this.setData({ room, result: null, isMine: false })
   },
 
   onThresholdChange(e) {
@@ -125,6 +159,7 @@ Page({
           : { tone: 'good', text: '充足' }
       const result = { ...data, tone: level.tone, statusText: level.text }
       this.setData({ result })
+      this.rememberSelection(room)
       wx.setStorageSync('lastRoom', room)
       this.syncMine()
     } catch (error) {
