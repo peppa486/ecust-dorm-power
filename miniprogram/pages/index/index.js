@@ -21,17 +21,20 @@ Page({
   async onLoad() {
     this.ready = false
     const last = wx.getStorageSync('lastRoom') || null
-    if (last?.campus) {
-      const index = this.data.campuses.indexOf(last.campus)
-      if (index >= 0) this.setData({ campusIndex: index, room: last.room || '' })
-    }
-    await this.loadBuildings(last?.building)
+    const lastCampusIndex = last?.campus ? this.data.campuses.indexOf(last.campus) : -1
+    const campusIndex = lastCampusIndex >= 0 ? lastCampusIndex : this.data.campusIndex
+    if (lastCampusIndex >= 0) await this.setDataAsync({ campusIndex, room: last.room || '' })
+    const restored = await this.loadBuildings(lastCampusIndex >= 0 ? last.building : '', campusIndex)
     await Promise.all([
       this.loadClientConfig(),
       wx.getStorageSync('token') ? this.loadWatch() : Promise.resolve()
     ])
-    if (last?.room) await this.runQuery(true)
+    if (restored && last?.room) await this.runQuery(true)
     this.ready = true
+  },
+
+  setDataAsync(data) {
+    return new Promise(resolve => this.setData(data, resolve))
   },
 
   onShow() {
@@ -45,14 +48,19 @@ Page({
     } catch (_) {}
   },
 
-  async loadBuildings(preferred) {
-    const campus = this.data.campuses[this.data.campusIndex]
+  async loadBuildings(preferred, campusIndex = this.data.campusIndex) {
+    const campus = this.data.campuses[campusIndex]
     try {
       const data = await request(`/api/buildings?campus=${encodeURIComponent(campus)}`)
-      const index = preferred ? data.buildings.findIndex(item => item.value === preferred) : 0
-      this.setData({ buildings: data.buildings, buildingIndex: index >= 0 ? index : 0 })
+      const preferredIndex = preferred ? data.buildings.findIndex(item => item.value === preferred) : 0
+      await this.setDataAsync({
+        buildings: data.buildings,
+        buildingIndex: preferredIndex >= 0 ? preferredIndex : 0
+      })
+      return !preferred || preferredIndex >= 0
     } catch (_) {
       wx.showToast({ title: '楼栋加载失败', icon: 'none' })
+      return false
     }
   },
 
@@ -73,7 +81,7 @@ Page({
     const index = Number(e.currentTarget.dataset.index)
     if (index === this.data.campusIndex) return
     this.setData({ campusIndex: index, buildingIndex: 0, result: null, isMine: false })
-    this.loadBuildings()
+    this.loadBuildings('', index)
   },
 
   onBuildingChange(e) {
