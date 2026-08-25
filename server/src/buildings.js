@@ -26,7 +26,7 @@ export function validateRoom(campus, building, room) {
   if (!Object.hasOwn(BUILDINGS, campus)) throw new Error('不支持的校区')
   if (!Object.hasOwn(BUILDINGS[campus], building)) throw new Error('不支持的楼栋')
   const normalized = normalizeRoom(room)
-  if (!/^[0-9A-Z-]{2,8}$/.test(normalized)) throw new Error('寝室号格式不正确')
+  if (!/^(?=.*\d)[0-9A-Z-]{2,8}$/.test(normalized)) throw new Error('寝室号格式不正确')
   return normalized
 }
 

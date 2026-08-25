@@ -22,7 +22,7 @@ server/test/   单元测试
 
 ## 本地运行
 
-Node.js 20+。
+Node.js 20.17+（生产 Docker 使用 Node.js 22）。
 
 ```bash
 cd server
@@ -40,7 +40,7 @@ curl -X POST http://127.0.0.1:8787/api/query \
   -d '{"campus":"奉贤","building":"5","room":"202"}'
 ```
 
-微信开发者工具导入仓库根目录。开发环境 API 地址在 `miniprogram/utils/config.js`。
+微信开发者工具导入仓库根目录。`miniprogram/utils/config.js` 中的 `API_ENV` 用于切换环境：本地联调保留 `development`，发布前改为 `production`，并将 `API_BASES.production` 改成自己的 HTTPS API 域名。`project.config.json` 中的 `appid` 是占位值，发布前替换为小程序 AppID；AppSecret 只放在服务端 `.env`，不要提交到 Git。
 
 ## 微信配置
 
@@ -52,12 +52,13 @@ WECHAT_SECRET=
 WECHAT_LOW_POWER_TEMPLATE_ID=
 WECHAT_FIELD_ROOM=thing1
 WECHAT_FIELD_POWER=number2
+WECHAT_FIELD_POWER_TYPE=number
 WECHAT_FIELD_TIP=thing3
 ```
 
-订阅模板字段名以微信公众平台实际模板为准。推荐把“当前电量”配置为 `number` 类型。
+订阅模板字段名和电量字段类型以微信公众平台实际模板为准，四个 `WECHAT_FIELD_*` 值都需要配置。推荐把“当前电量”配置为 `number` 类型。
 
-正式发布时把 `miniprogram/utils/config.js` 改为 HTTPS API 域名，并在微信公众平台添加 request 合法域名。
+正式发布时把 `miniprogram/utils/config.js` 的 `API_ENV` 改为 `production`，在微信公众平台添加 HTTPS request 合法域名，并将开发者工具的 `urlCheck` 改为 `true`。
 
 ## 部署
 

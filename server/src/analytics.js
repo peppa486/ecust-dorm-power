@@ -8,14 +8,21 @@ function round(value, digits = 1) {
   return Math.round(value * scale) / scale
 }
 
+const HOUR_MS = 3_600_000
+const DAY_MS = 24 * HOUR_MS
+const MAX_POWER = 100_000
+const MAX_INTERVAL_HOURS = 48
+const MAX_CONSUMPTION_RATE = 10
+const MAX_ESTIMATED_DAYS = 365
+
 export function normalizeHistory(items) {
-  return items
+  return (Array.isArray(items) ? items : [])
     .map(item => ({
       ...item,
       kwh: Number(item.kwh),
       timeMs: toMs(item.created_at ?? item.createdAt)
     }))
-    .filter(item => Number.isFinite(item.kwh) && item.timeMs !== null)
+    .filter(item => Number.isFinite(item.kwh) && item.kwh >= -100 && item.kwh <= MAX_POWER && item.timeMs !== null)
     .sort((a, b) => a.timeMs - b.timeMs)
 }
 
@@ -28,25 +35,37 @@ export function computeHistoryStats(items, nowMs = Date.now()) {
   let totalConsumed = 0
   let consumed24h = 0
   let rechargeCount = 0
-  const dayAgo = nowMs - 24 * 60 * 60 * 1000
+  const dayAgo = nowMs - DAY_MS
+  let validHours = 0
 
   for (let i = 1; i < points.length; i += 1) {
     const prev = points[i - 1]
     const curr = points[i]
+    const intervalMs = curr.timeMs - prev.timeMs
+    const intervalHours = intervalMs / HOUR_MS
+    if (intervalHours <= 0 || intervalHours > MAX_INTERVAL_HOURS) continue
     const drop = prev.kwh - curr.kwh
-    if (drop > 0 && drop < 100) {
+    if (drop > 0 && drop < 100 && drop / intervalHours <= MAX_CONSUMPTION_RATE) {
       totalConsumed += drop
-      if (prev.timeMs >= dayAgo) consumed24h += drop
+      validHours += intervalHours
+      const overlapMs = Math.max(0, Math.min(curr.timeMs, nowMs) - Math.max(prev.timeMs, dayAgo))
+      if (overlapMs > 0) consumed24h += drop * (overlapMs / intervalMs)
     } else if (drop < -2) {
       rechargeCount += 1
+    } else {
+      validHours += intervalHours
     }
   }
 
-  const spanHours = (points.at(-1).timeMs - points[0].timeMs) / 3_600_000
-  const covered24h = points[0].timeMs <= dayAgo + 2 * 3_600_000
-  const dailyAverage = spanHours >= 12 ? totalConsumed / (spanHours / 24) : null
+  const firstTime = points[0].timeMs
+  const lastTime = points.at(-1).timeMs
+  const covered24h = firstTime <= dayAgo + 2 * HOUR_MS && lastTime >= nowMs - 2 * HOUR_MS
+  const dailyAverage = validHours >= 12 ? totalConsumed / (validHours / 24) : null
   const current = points.at(-1).kwh
-  const estimatedDays = dailyAverage && dailyAverage >= 0.05 ? Math.max(current, 0) / dailyAverage : null
+  const rawEstimatedDays = dailyAverage && dailyAverage >= 0.05
+    ? Math.max(current, 0) / dailyAverage
+    : null
+  const estimatedDays = rawEstimatedDays === null ? null : Math.min(rawEstimatedDays, MAX_ESTIMATED_DAYS)
 
   return {
     current: round(current, 2),

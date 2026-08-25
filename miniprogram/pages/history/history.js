@@ -52,7 +52,7 @@ Page({
   },
 
   drawChart() {
-    const points = this.data.items.slice(-96)
+    const points = this.data.items.slice(-168)
     const query = wx.createSelectorQuery().in(this)
     query.select('#trendCanvas').fields({ node: true, size: true }).exec(result => {
       const entry = result?.[0]

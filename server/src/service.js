@@ -6,31 +6,55 @@ import { fetchPower } from './power.js'
 import { sendLowPower, WeChatSendError } from './wechat.js'
 
 const cache = new TtlCache(Number(process.env.CACHE_SECONDS || 600) * 1000)
-const powerProvider = fetchPower
+const inFlightQueries = new Map()
+let snapshotWrite = Promise.resolve()
+let pollPromise = null
 
-export async function queryPower(campus, building, room, { fresh = false } = {}) {
+function normalizeThreshold(value) {
+  const number = value === undefined || value === null || value === '' ? 15 : Number(value)
+  if (!Number.isFinite(number)) throw new Error('提醒阈值格式不正确')
+  return Math.max(5, Math.min(40, number))
+}
+
+export async function queryPower(campus, building, room, { fresh = false, provider = fetchPower } = {}) {
   const normalizedRoom = validateRoom(campus, building, room)
   const key = roomKey(campus, building, normalizedRoom)
   if (!fresh) {
     const hit = cache.get(key)
     if (hit) return { ...hit, cached: true }
   }
-  const data = await powerProvider(campus, building, normalizedRoom)
-  cache.set(key, data)
-  return { ...data, cached: false }
+  const pending = inFlightQueries.get(key)
+  if (pending) return { ...(await pending), cached: true }
+
+  const request = Promise.resolve()
+    .then(() => provider(campus, building, normalizedRoom))
+    .then(data => {
+      cache.set(key, data)
+      return data
+    })
+  inFlightQueries.set(key, request)
+  try {
+    return { ...(await request), cached: false }
+  } finally {
+    if (inFlightQueries.get(key) === request) inFlightQueries.delete(key)
+  }
 }
 
-export async function storeSnapshot(data) {
-  const db = await getDb()
-  const key = roomKey(data.campus, data.building, data.room)
-  const last = await db.get('SELECT kwh,created_at FROM snapshots WHERE room_key=? ORDER BY id DESC LIMIT 1', key)
-  const lastTime = last ? Date.parse(last.created_at) : 0
-  if (lastTime && Date.now() - lastTime < 20 * 60 * 1000) return false
-  await db.run(
-    'INSERT INTO snapshots(room_key,campus,building,room,kwh,created_at) VALUES(?,?,?,?,?,?)',
-    key, data.campus, data.building, data.room, data.kwh, new Date().toISOString()
-  )
-  return true
+export function storeSnapshot(data) {
+  const operation = snapshotWrite.then(async () => {
+    const db = await getDb()
+    const key = roomKey(data.campus, data.building, data.room)
+    const last = await db.get('SELECT created_at FROM snapshots WHERE room_key=? ORDER BY id DESC LIMIT 1', key)
+    const lastTime = last ? Date.parse(last.created_at) : 0
+    if (lastTime && Date.now() - lastTime < 20 * 60 * 1000) return false
+    await db.run(
+      'INSERT INTO snapshots(room_key,campus,building,room,kwh,created_at) VALUES(?,?,?,?,?,?)',
+      key, data.campus, data.building, data.room, data.kwh, new Date().toISOString()
+    )
+    return true
+  })
+  snapshotWrite = operation.catch(() => {})
+  return operation
 }
 
 export async function getWatch(openid) {
@@ -46,13 +70,17 @@ export async function getWatch(openid) {
   }
 }
 
-export async function saveWatch(openid, campus, building, room, threshold) {
+export async function saveWatch(openid, campus, building, room, threshold, { provider = fetchPower } = {}) {
+  return saveWatchWithProvider(openid, campus, building, room, threshold, provider)
+}
+
+async function saveWatchWithProvider(openid, campus, building, room, threshold, provider = fetchPower) {
   const normalizedRoom = validateRoom(campus, building, room)
-  const safeThreshold = Math.max(5, Math.min(40, Number(threshold || 15)))
-  if (!Number.isFinite(safeThreshold)) throw new Error('提醒阈值格式不正确')
+  const safeThreshold = normalizeThreshold(threshold)
   const db = await getDb()
-  const existing = await db.get('SELECT campus,building,room,alerted FROM watches WHERE openid=?', openid)
+  const existing = await db.get('SELECT campus,building,room,threshold,alerted FROM watches WHERE openid=?', openid)
   const changedRoom = !existing || existing.campus !== campus || existing.building !== building || existing.room !== normalizedRoom
+  const resetAlerted = changedRoom || Number(existing?.threshold) !== safeThreshold
   await db.run(
     `INSERT INTO watches(openid,campus,building,room,threshold,credits,alerted,updated_at)
      VALUES(?,?,?,?,?,0,0,CURRENT_TIMESTAMP)
@@ -63,7 +91,7 @@ export async function saveWatch(openid, campus, building, room, threshold) {
        threshold=excluded.threshold,
        alerted=CASE WHEN ? THEN 0 ELSE watches.alerted END,
        updated_at=CURRENT_TIMESTAMP`,
-    openid, campus, building, normalizedRoom, safeThreshold, changedRoom ? 1 : 0
+    openid, campus, building, normalizedRoom, safeThreshold, resetAlerted ? 1 : 0
   )
   if (changedRoom && existing) {
     const oldKey = roomKey(existing.campus, existing.building, existing.room)
@@ -76,7 +104,7 @@ export async function saveWatch(openid, campus, building, room, threshold) {
 
   if (changedRoom) {
     try {
-      const data = await queryPower(campus, building, normalizedRoom)
+      const data = await queryPower(campus, building, normalizedRoom, { provider })
       await storeSnapshot(data)
     } catch (error) {
       console.warn(`snapshot ${campus}/${building}/${normalizedRoom}: ${error.message}`)
@@ -105,13 +133,14 @@ export async function cleanupSnapshots(days = 14) {
 
 export async function addSubscriptionCredit(openid, threshold) {
   const db = await getDb()
-  const watch = await db.get('SELECT openid FROM watches WHERE openid=?', openid)
+  const watch = await db.get('SELECT openid,threshold FROM watches WHERE openid=?', openid)
   if (!watch) throw new Error('请先设为我的寝室')
-  const safeThreshold = Math.max(5, Math.min(40, Number(threshold || 15)))
-  if (!Number.isFinite(safeThreshold)) throw new Error('提醒阈值格式不正确')
+  const safeThreshold = normalizeThreshold(threshold)
+  const resetAlerted = Number(watch.threshold) !== safeThreshold
   await db.run(
-    'UPDATE watches SET threshold=?,credits=MIN(credits+1,5),updated_at=CURRENT_TIMESTAMP WHERE openid=?',
+    'UPDATE watches SET threshold=?,credits=MIN(credits+1,5),alerted=CASE WHEN ? THEN 0 ELSE alerted END,updated_at=CURRENT_TIMESTAMP WHERE openid=?',
     safeThreshold,
+    resetAlerted ? 1 : 0,
     openid
   )
   return getWatch(openid)
@@ -125,10 +154,11 @@ export async function getHistory(openid) {
   const items = await db.all(
     `SELECT id,kwh,created_at FROM snapshots
      WHERE room_key=? AND datetime(created_at)>=datetime(?)
-     ORDER BY created_at ASC LIMIT 240`,
+     ORDER BY created_at DESC, id DESC LIMIT 1008`,
     key,
-    new Date(Date.now() - 8 * 24 * 60 * 60 * 1000).toISOString()
+    new Date(Date.now() - 14 * 24 * 60 * 60 * 1000).toISOString()
   )
+  items.reverse()
   return {
     watch,
     displayName: watch.displayName,
@@ -148,14 +178,15 @@ async function mapLimit(items, limit, worker) {
   await Promise.all(jobs)
 }
 
-export async function pollWatches() {
+async function pollWatchesOnce({ powerProvider = fetchPower, sendNotification = sendLowPower } = {}) {
   const db = await getDb()
   const rooms = await db.all('SELECT DISTINCT campus,building,room FROM watches')
-  const concurrency = Math.max(1, Math.min(8, Number(process.env.POLL_CONCURRENCY || 3)))
+  const configuredConcurrency = Number(process.env.POLL_CONCURRENCY || 3)
+  const concurrency = Math.max(1, Math.min(8, Number.isFinite(configuredConcurrency) ? Math.floor(configuredConcurrency) : 3))
 
   await mapLimit(rooms, concurrency, async room => {
     try {
-      const data = await queryPower(room.campus, room.building, room.room, { fresh: true })
+      const data = await queryPower(room.campus, room.building, room.room, { fresh: true, provider: powerProvider })
       await storeSnapshot(data)
       const users = await db.all(
         'SELECT openid,campus,building,room,threshold,credits,alerted FROM watches WHERE campus=? AND building=? AND room=?',
@@ -170,8 +201,11 @@ export async function pollWatches() {
         if (data.kwh > watch.threshold || watch.alerted || watch.credits <= 0) continue
 
         try {
-          await sendLowPower(watch.openid, watch, data.kwh)
-          await db.run('UPDATE watches SET alerted=1,credits=MAX(credits-1,0) WHERE openid=?', watch.openid)
+          await sendNotification(watch.openid, watch, data.kwh)
+          await db.run(
+            'UPDATE watches SET alerted=1,credits=MAX(credits-1,0) WHERE openid=? AND credits>0 AND alerted=0',
+            watch.openid
+          )
         } catch (error) {
           if (error instanceof WeChatSendError && error.code === 43101) {
             await db.run('UPDATE watches SET credits=0 WHERE openid=?', watch.openid)
@@ -184,4 +218,12 @@ export async function pollWatches() {
       console.error(`poll ${room.campus}/${room.building}/${room.room}: ${error.message}`)
     }
   })
+}
+
+export async function pollWatches(options) {
+  if (pollPromise) return pollPromise
+  pollPromise = pollWatchesOnce(options).finally(() => {
+    pollPromise = null
+  })
+  return pollPromise
 }

@@ -1,6 +1,7 @@
 export function createRateLimit({ windowMs = 60_000, max = 60 } = {}) {
   const buckets = new Map()
   let calls = 0
+  const limit = Math.max(1, Math.floor(Number(max)) || 1)
 
   return function rateLimit(req, res, next) {
     const now = Date.now()
@@ -17,7 +18,7 @@ export function createRateLimit({ windowMs = 60_000, max = 60 } = {}) {
       }
     }
 
-    if (bucket.count > max) return res.status(429).json({ error: '请求太频繁，请稍后再试' })
+    if (bucket.count > limit) return res.status(429).json({ error: '请求太频繁，请稍后再试' })
     next()
   }
 }

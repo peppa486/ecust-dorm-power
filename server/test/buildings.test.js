@@ -22,4 +22,5 @@ test('room validation normalizes letters and rejects unsafe values', () => {
   assert.equal(roomKey('奉贤', '5', ' 202 '), '奉贤:5:202')
   assert.throws(() => validateRoom('奉贤', '99', '202'), /楼栋/)
   assert.throws(() => validateRoom('奉贤', '5', '../2'), /寝室号/)
+  assert.throws(() => validateRoom('奉贤', '5', '--'), /寝室号/)
 })

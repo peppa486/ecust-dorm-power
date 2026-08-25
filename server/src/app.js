@@ -14,7 +14,13 @@ import {
 
 export function createApp() {
   const app = express()
-  app.set('trust proxy', Number(process.env.TRUST_PROXY || 0))
+  const trustProxy = String(process.env.TRUST_PROXY || '').toLowerCase()
+  const trustProxyHops = trustProxy === 'true'
+    ? 1
+    : Number.isInteger(Number(trustProxy)) && Number(trustProxy) >= 0
+      ? Number(trustProxy)
+      : 0
+  app.set('trust proxy', trustProxyHops)
   app.use(helmet())
   app.use(express.json({ limit: '16kb' }))
   app.use('/api', createRateLimit({ max: Number(process.env.RATE_LIMIT_PER_MINUTE || 60) }))
@@ -44,7 +50,7 @@ export function createApp() {
     }
   })
 
-  app.post('/api/auth/login', async (req, res, next) => {
+  app.post('/api/auth/login', createRateLimit({ max: Number(process.env.RATE_LIMIT_LOGIN_PER_MINUTE || 10) }), async (req, res, next) => {
     try {
       res.json(await loginWithCode(req.body?.code))
     } catch (error) {
@@ -101,10 +107,12 @@ export function createApp() {
   app.use((_req, res) => res.status(404).json({ error: 'Not found' }))
 
   app.use((error, _req, res, _next) => {
-    const message = error?.message || '服务器异常'
+    const message = error?.message || ''
     const isClientError = /不支持|格式|缺少|未配置|未设置|没有设置|还没有|请先|不匹配/.test(message)
-    if (!isClientError) console.error(error)
-    res.status(isClientError ? 400 : 502).json({ error: message })
+    const statusCode = Number(error?.statusCode) || (isClientError ? 400 : 500)
+    const expose = statusCode < 500 || error?.expose
+    if (statusCode >= 500) console.error(error)
+    res.status(statusCode).json({ error: expose ? error?.message || '服务器异常' : '服务器暂时不可用' })
   })
 
   return app

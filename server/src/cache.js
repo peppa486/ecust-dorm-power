@@ -1,7 +1,7 @@
 export class TtlCache {
   constructor(ttlMs, maxEntries = 2000) {
-    this.ttlMs = ttlMs
-    this.maxEntries = maxEntries
+    this.ttlMs = Math.max(0, Number(ttlMs) || 0)
+    this.maxEntries = Math.max(1, Math.floor(Number(maxEntries)) || 1)
     this.map = new Map()
   }
 

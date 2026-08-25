@@ -9,16 +9,35 @@ function hashToken(token) {
 }
 
 export async function loginWithCode(code) {
-  if (!code) throw new Error('缺少微信登录 code')
+  if (typeof code !== 'string' || !code.trim() || code.length > 512) throw new Error('缺少微信登录 code')
   const appid = process.env.WECHAT_APPID
   const secret = process.env.WECHAT_SECRET
-  if (!appid || !secret) throw new Error('服务端尚未配置微信登录')
+  if (!appid || !secret) {
+    const error = new Error('服务端尚未配置微信登录')
+    error.statusCode = 503
+    error.expose = true
+    throw error
+  }
 
-  const { data } = await axios.get('https://api.weixin.qq.com/sns/jscode2session', {
-    params: { appid, secret, js_code: code, grant_type: 'authorization_code' },
-    timeout: 10000
-  })
-  if (!data.openid) throw new Error(data.errmsg || '微信登录失败')
+  let data
+  try {
+    ({ data } = await axios.get('https://api.weixin.qq.com/sns/jscode2session', {
+      params: { appid, secret, js_code: code, grant_type: 'authorization_code' },
+      timeout: 10000
+    }))
+  } catch (cause) {
+    const error = new Error('微信登录服务暂时不可用')
+    error.statusCode = 503
+    error.expose = true
+    error.cause = cause
+    throw error
+  }
+  if (!data.openid) {
+    const error = new Error(data.errmsg || '微信登录失败')
+    error.statusCode = 400
+    error.expose = true
+    throw error
+  }
 
   const db = await getDb()
   const token = crypto.randomBytes(32).toString('base64url')

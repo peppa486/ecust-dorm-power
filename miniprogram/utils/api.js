@@ -23,7 +23,11 @@ export function request(path, options = {}) {
         if (res.statusCode === 401) wx.removeStorageSync('token')
         reject(makeError(res))
       },
-      fail: reject
+      fail(error) {
+        const failure = new Error(error.errMsg || '网络请求失败')
+        failure.code = error.errCode
+        reject(failure)
+      }
     })
   })
 }
@@ -31,6 +35,7 @@ export function request(path, options = {}) {
 export async function ensureLogin(force = false) {
   if (!force && wx.getStorageSync('token')) return
   const login = await new Promise((resolve, reject) => wx.login({ success: resolve, fail: reject }))
+  if (!login?.code) throw new Error('微信登录失败，请重试')
   const data = await request('/api/auth/login', { method: 'POST', data: { code: login.code } })
   wx.setStorageSync('token', data.token)
 }

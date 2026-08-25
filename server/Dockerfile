@@ -1,7 +1,7 @@
 FROM node:22-bookworm AS deps
 WORKDIR /app
 COPY package*.json ./
-RUN npm install --omit=dev --no-audit --no-fund
+RUN npm ci --omit=dev --no-audit --no-fund
 
 FROM node:22-bookworm-slim
 WORKDIR /app

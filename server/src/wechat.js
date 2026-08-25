@@ -31,13 +31,38 @@ async function getAccessToken() {
   return tokenRequest
 }
 
-function lowPowerData(watch, kwh) {
-  const roomField = process.env.WECHAT_FIELD_ROOM || 'thing1'
-  const powerField = process.env.WECHAT_FIELD_POWER || 'number2'
-  const tipField = process.env.WECHAT_FIELD_TIP || 'thing3'
+function requiredField(name) {
+  const value = String(process.env[name] || '').trim()
+  if (!value) {
+    const error = new Error(`未配置微信订阅模板字段 ${name}`)
+    error.statusCode = 503
+    error.expose = true
+    throw error
+  }
+  return value
+}
+
+export function buildLowPowerData(watch, kwh) {
+  if (!Number.isFinite(Number(kwh))) throw new Error('电量数据无效')
+  const roomField = requiredField('WECHAT_FIELD_ROOM')
+  const powerField = requiredField('WECHAT_FIELD_POWER')
+  const tipField = requiredField('WECHAT_FIELD_TIP')
+  const powerType = requiredField('WECHAT_FIELD_POWER_TYPE').toLowerCase()
+  if (!['number', 'thing', 'phrase', 'character_string', 'text'].includes(powerType)) {
+    const error = new Error('微信订阅模板电量字段类型不支持')
+    error.statusCode = 503
+    error.expose = true
+    throw error
+  }
+  if (new Set([roomField, powerField, tipField]).size !== 3) {
+    const error = new Error('微信订阅模板字段不能重复')
+    error.statusCode = 503
+    error.expose = true
+    throw error
+  }
   return {
     [roomField]: { value: `${watch.campus}${buildingLabel(watch.campus, watch.building)} ${watch.room}`.slice(0, 20) },
-    [powerField]: { value: (powerField.startsWith('number') ? String(kwh) : `${kwh} 度`).slice(0, 20) },
+    [powerField]: { value: (powerType === 'number' ? String(kwh) : `${kwh} 度`).slice(0, 20) },
     [tipField]: { value: `低于 ${watch.threshold} 度，请及时充值`.slice(0, 20) }
   }
 }
@@ -51,7 +76,7 @@ async function sendRequest(accessToken, openid, watch, kwh, templateId) {
       page: 'pages/index/index',
       miniprogram_state: process.env.WECHAT_MINIPROGRAM_STATE || 'formal',
       lang: 'zh_CN',
-      data: lowPowerData(watch, kwh)
+      data: buildLowPowerData(watch, kwh)
     },
     { timeout: 10000 }
   )

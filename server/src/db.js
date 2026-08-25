@@ -8,6 +8,8 @@ let dbPromise
 async function migrate(db) {
   await db.exec(`
     PRAGMA journal_mode=WAL;
+    PRAGMA busy_timeout=5000;
+    PRAGMA synchronous=NORMAL;
     PRAGMA foreign_keys=ON;
     CREATE TABLE IF NOT EXISTS sessions (
       token TEXT PRIMARY KEY,
@@ -42,6 +44,7 @@ async function migrate(db) {
     await db.exec('ALTER TABLE sessions ADD COLUMN expires_at INTEGER')
     await db.run('UPDATE sessions SET expires_at=? WHERE expires_at IS NULL', Date.now() - 1)
   }
+  await db.exec('CREATE INDEX IF NOT EXISTS idx_sessions_expiry ON sessions(expires_at)')
 }
 
 export async function getDb() {

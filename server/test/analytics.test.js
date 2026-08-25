@@ -37,3 +37,28 @@ test('with short history, daily metrics stay unavailable', () => {
   assert.equal(stats.estimatedDays, null)
   assert.equal(stats.consumed24h, null)
 })
+
+test('uses only valid intervals after a recharge for daily average', () => {
+  const points = [
+    item(30, 30, 1),
+    item(24, 28, 2),
+    item(18, 26, 3),
+    item(12, 75, 4),
+    item(6, 73, 5),
+    item(0, 71, 6)
+  ]
+  const stats = computeHistoryStats(points, now)
+  assert.equal(stats.dailyAverage, 8)
+})
+
+test('keeps long periods without consumption finite and does not use an outlier drop', () => {
+  const stats = computeHistoryStats([
+    item(30, 100, 1),
+    item(20, 100, 2),
+    item(19, 1, 3),
+    item(0, 1, 4)
+  ], now)
+  assert.equal(stats.dailyAverage, 0)
+  assert.equal(stats.estimatedDays, null)
+  assert.equal(stats.rechargeCount, 0)
+})
