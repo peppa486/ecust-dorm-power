@@ -4,6 +4,7 @@
     "pages/history/history",
     "pages/about/about"
   ],
+  "lazyCodeLoading": "requiredComponents",
   "window": {
     "navigationBarTitleText": "华理宿舍电量查询",
     "navigationBarBackgroundColor": "#f4f5f7",
