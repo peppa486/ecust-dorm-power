@@ -2,7 +2,9 @@
 
 面向华东理工大学学生的 Android 宿舍电量查询工具，提供奉贤、徐汇校区的楼栋和寝室电量查询。项目为非官方工具，与华东理工大学无隶属或授权关系。
 
-查询网页：<https://power.ecust.cc>
+服务端 API：<https://power.ecust.cc>
+
+> 说明：该地址目前只提供 App 使用的 HTTPS 接口，不是已部署的网页查询页面。直接打开根路径不会显示查询界面；健康检查地址为 `/health`，楼栋和电量查询接口见下文。
 
 ## 当前功能
 
@@ -61,6 +63,16 @@ docker compose up -d --build
 容器端口仅绑定宿主机 `127.0.0.1:8787`，由 Nginx/Caddy 提供 HTTPS。`deploy/Caddyfile.example` 可直接作为反代模板。
 
 服务端密钥只放在 `server/.env`，不要提交到 Git。普通查询不落历史；服务端只为已登记关注寝室采样，历史默认保留 14 天。
+
+当前公开接口：
+
+```text
+GET  /health
+GET  /api/buildings?campus=奉贤
+POST /api/query                 # JSON: { campus, building, room }
+```
+
+上述接口供 App 调用；项目目前没有部署独立 Web 查询前端。
 
 ## 开发检查
 
