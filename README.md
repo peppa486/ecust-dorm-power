@@ -1,92 +1,41 @@
 # 华理宿舍电量查询
 
-面向华东理工大学学生的 Android 宿舍电量查询工具，提供奉贤、徐汇校区的楼栋和寝室电量查询。项目为非官方工具，与华东理工大学无隶属或授权关系。
+一个面向华东理工大学学生的非官方 Android 宿舍电量查询工具。
 
-服务端 API：<https://power.ecust.cc>
+> 本项目与华东理工大学无隶属或授权关系。
 
-> 说明：该地址目前只提供 App 使用的 HTTPS 接口，不是已部署的网页查询页面。直接打开根路径不会显示查询界面；健康检查地址为 `/health`，楼栋和电量查询接口见下文。
+## 主要功能
 
-## 当前功能
+- 支持奉贤、徐汇两个校区。
+- 查询楼栋和寝室的实时剩余电量。
+- 自动记住上次选择的校区、楼栋和寝室。
+- 设置“我的寝室”，只为自己的寝室记录用电趋势。
+- 查看近 48 个采样点的趋势缩略图，以及最长 14 天的历史曲线。
+- 详情曲线可左右拖动，横轴为时间，纵轴为剩余电量。
+- 识别充值造成的电量明显上升，并在曲线上标记。
+- 自定义低电量阈值，并在电量降低到阈值时发送提醒。
 
-- Android App：查询、保存上次选择，并可设置“我的寝室”。
-- 只有“我的寝室”显示趋势和低电量监控；普通查询不保存历史。
-- 缩略图显示最近约 48 个采样点；详情图显示较长期历史，最多保留 14 天并可横向拖动。
-- 横轴按真实采样时间，纵轴为剩余电量（度）；充值导致的明显上升用橙色标识。
-- 用户可设置 5–40 度的低电量阈值，并开启 Android 本地通知。
-- 服务端使用 HTTPS、限流、请求超时、数据校验和安全响应头；服务端保留已登记关注寝室的定时采样与微信旧链路。
+## 下载使用
 
-## 目录
+下载并安装：[Android APK](mobile/releases/ecust-dorm-power-1.0.0-release.apk)
 
-```text
-mobile/       Android App（Android Studio 打开此目录下的 android/）
-server/       Node.js API、定时采样和微信旧链路
-miniprogram/  原微信小程序代码（保留作历史兼容）
-deploy/       反向代理和部署示例
-```
+打开应用后：
 
-## Android App
+1. 选择校区、楼栋，输入寝室号。
+2. 点击“查询”。
+3. 如需趋势和提醒，点击“设为我的寝室”。
+4. 在低电量提醒中设置阈值并开启提醒。
 
-在 Android Studio 中打开：`mobile/android/`。
+## 关于网页地址
 
-```bash
-cd mobile
-npm ci
-cd android
-./gradlew assembleRelease
-```
+[power.ecust.cc](https://power.ecust.cc) 是 App 使用的服务端地址，目前不是网页查询页面。直接打开不会显示查询界面，网页查询功能暂未提供。
 
-Windows 使用 `gradlew.bat assembleRelease`。已构建的安装包位于 [`mobile/releases/ecust-dorm-power-1.0.0-release.apk`](mobile/releases/ecust-dorm-power-1.0.0-release.apk)。App 内置 `https://power.ecust.cc`，release 包不依赖 Metro。
+## 后台提醒说明
 
-### 后台限制
+应用会在系统允许的情况下自动刷新“我的寝室”电量并记录趋势。Android 和手机厂商可能限制后台任务；如果手动强行停止应用或关闭后台权限，不能保证每小时执行，也不能保证及时发送本地提醒。
 
-Android 后台任务由系统和手机厂商调度，不能承诺精确每小时执行。应用被系统回收时通常可以恢复，但用户主动强行停止应用，或 Vivo 的自启动、后台活动和电池优化限制未放开时，系统可能暂停本地任务。需要在强行停止后仍稳定记录并远程通知时，还需配置 Android 推送服务（FCM/Expo Push）及服务端推送凭据；仅靠 App 本地通知无法绕过系统的强行停止策略。
+## 开发者
 
-## 服务端运行
+使用 Android Studio 打开 `mobile/android/` 即可查看和构建项目。
 
-需要 Node.js 20.17+（生产 Docker 使用 Node.js 22）：
-
-```bash
-cd server
-cp .env.example .env
-npm ci
-npm test
-npm start
-```
-
-API 默认监听 `8787`。生产部署：
-
-```bash
-cd server
-docker compose up -d --build
-```
-
-容器端口仅绑定宿主机 `127.0.0.1:8787`，由 Nginx/Caddy 提供 HTTPS。`deploy/Caddyfile.example` 可直接作为反代模板。
-
-服务端密钥只放在 `server/.env`，不要提交到 Git。普通查询不落历史；服务端只为已登记关注寝室采样，历史默认保留 14 天。
-
-当前公开接口：
-
-```text
-GET  /health
-GET  /api/buildings?campus=奉贤
-POST /api/query                 # JSON: { campus, building, room }
-```
-
-上述接口供 App 调用；项目目前没有部署独立 Web 查询前端。
-
-## 开发检查
-
-```bash
-cd mobile
-npm run typecheck
-npm audit --omit=dev
-
-cd ../server
-npm test
-npm run check
-npm audit --omit=dev
-```
-
-当前移动端和服务端依赖审计均为 0 vulnerabilities。移动端使用 npm override 固定已修复的 `uuid` 版本；不要使用会降级 Expo 的 `npm audit fix --force`。
-
-楼栋 ID 与查询方式参考 `ECUSTCIC-CodeHub/ECUST-Electricity-Docker`。学校页面调整后，需同步更新 `server/src/buildings.js` 或 `server/src/power-parser.js`。
+本项目仅供学习和个人使用。
