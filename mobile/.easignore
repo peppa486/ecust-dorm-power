@@ -1,0 +1,34 @@
+# Dependencies and local Expo state
+node_modules/
+.expo/
+dist/
+web-build/
+
+# Android build output and machine-local state
+android/.gradle/
+android/.idea/
+android/.kotlin/
+android/build/
+android/app/build/
+android/app/.cxx/
+android/local.properties
+
+# Local signing material
+android/app/*.keystore
+android/app/*.jks
+*.jks
+*.p8
+*.p12
+*.key
+*.mobileprovision
+
+# Local-only files that must never be committed
+*.orig.*
+env*.local
+npm-debug.*
+yarn-debug.*
+yarn-error.*
+
+# Never upload a server credential; the Android client config is intentionally kept
+# in the build context for googleServicesFile.
+*firebase-adminsdk*.json
