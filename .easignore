@@ -1,0 +1,38 @@
+# This repository contains the Android app in /mobile. Keep the EAS archive
+# focused on that app and exclude local/generated files from the repo root.
+.git/
+miniprogram/
+server/node_modules/
+server/data/
+server/.env
+
+# The app dependencies and local Expo state are restored on the builder.
+mobile/node_modules/
+mobile/.expo/
+mobile/dist/
+mobile/web-build/
+
+# Never send machine-specific Android build output. In particular, stale
+# autolinking.json files can contain absolute Windows paths.
+mobile/android/.gradle/
+mobile/android/.idea/
+mobile/android/.kotlin/
+mobile/android/build/
+mobile/android/app/build/
+mobile/android/app/.cxx/
+mobile/android/local.properties
+
+# Local signing material and server credentials.
+mobile/android/app/*.keystore
+mobile/android/app/*.jks
+*.jks
+*.p8
+*.p12
+*.key
+*.mobileprovision
+**/*firebase-adminsdk*.json
+
+# EAS needs both client-side Firebase configuration files for this native
+# Android project. They are intentionally local-only and must be re-included.
+!mobile/google-services.json
+!mobile/android/app/google-services.json

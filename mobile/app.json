@@ -2,7 +2,7 @@
   "expo": {
     "name": "华理宿舍电量查询",
     "slug": "ecust-dorm-power-mobile",
-    "version": "1.1.0",
+    "version": "1.2.1",
     "icon": "./assets/icon.png",
     "splash": {
       "image": "./assets/icon.png",
@@ -10,14 +10,23 @@
       "backgroundColor": "#f4f5f7"
     },
     "orientation": "portrait",
+    "platforms": ["android"],
     "userInterfaceStyle": "light",
     "newArchEnabled": true,
     "android": {
-      "package": "cc.ecust.power.mobile"
+      "package": "cc.ecust.power.mobile",
+      "versionCode": 4,
+      "googleServicesFile": "./google-services.json"
     },
     "plugins": [
       "expo-background-task",
       "expo-notifications"
-    ]
+    ],
+    "extra": {
+      "eas": {
+        "projectId": "6e66483b-eedc-4e2d-b73c-4ae27d9b2d46"
+      }
+    },
+    "owner": "peppa79486"
   }
 }

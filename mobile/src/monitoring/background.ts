@@ -1,5 +1,6 @@
 import { Platform } from 'react-native'
 import * as BackgroundTask from 'expo-background-task'
+import Constants from 'expo-constants'
 import * as Notifications from 'expo-notifications'
 import * as TaskManager from 'expo-task-manager'
 
@@ -9,8 +10,9 @@ import { appendHistory, type HistoryPoint } from '../storage/history'
 
 export const HOURLY_MONITOR_TASK = 'ecust-power-hourly-monitor'
 const NOTIFICATION_CHANNEL = 'low-power'
+const UPDATE_NOTIFICATION_CHANNEL = 'app-updates'
 
-async function ensureNotificationChannel(): Promise<void> {
+export async function ensureNotificationChannels(): Promise<void> {
   if (Platform.OS !== 'android') return
   await Notifications.setNotificationChannelAsync(NOTIFICATION_CHANNEL, {
     name: '低电量提醒',
@@ -18,11 +20,17 @@ async function ensureNotificationChannel(): Promise<void> {
     vibrationPattern: [0, 250, 250, 250],
     lightColor: '#c27619'
   })
+  await Notifications.setNotificationChannelAsync(UPDATE_NOTIFICATION_CHANNEL, {
+    name: '版本更新',
+    importance: Notifications.AndroidImportance.DEFAULT,
+    vibrationPattern: [0, 180],
+    lightColor: '#1c1f24'
+  })
 }
 
 export async function requestNotificationAccess(): Promise<boolean> {
   if (Platform.OS !== 'android') return false
-  await ensureNotificationChannel()
+  await ensureNotificationChannels()
 
   let permission = await Notifications.getPermissionsAsync()
   if (permission.status !== 'granted') {
@@ -35,19 +43,23 @@ export async function getRemotePushToken(): Promise<string | null> {
   if (Platform.OS !== 'android') return null
 
   try {
+    await ensureNotificationChannels()
     const permission = await Notifications.getPermissionsAsync()
     if (permission.status !== 'granted') return null
 
-    const token = await Notifications.getExpoPushTokenAsync()
+    const projectId = Constants.expoConfig?.extra?.eas?.projectId
+    if (!projectId) return null
+
+    const token = await Notifications.getExpoPushTokenAsync({ projectId })
     return typeof token.data === 'string' ? token.data : null
   } catch {
-    // A project ID and Android push credentials are optional for local monitoring.
+    // Push credentials are optional for local monitoring; the server still samples.
     return null
   }
 }
 
 export async function sendLowPowerNotification(kwh: number, threshold: number): Promise<void> {
-  await ensureNotificationChannel()
+  await ensureNotificationChannels()
   const permission = await Notifications.getPermissionsAsync()
   if (permission.status !== 'granted') return
 

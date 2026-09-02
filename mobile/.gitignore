@@ -17,6 +17,7 @@ android/gradle/gradle-daemon-jvm.properties
 *.p12
 *.key
 *.mobileprovision
+google-services.json
 *.orig.*
 env*.local
 npm-debug.*

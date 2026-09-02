@@ -34,6 +34,10 @@ const CHART_PADDING = 10
 const DETAIL_POINT_WIDTH = 14
 const PREVIEW_POINT_LIMIT = 48
 const DETAIL_POINT_LIMIT = 336
+const GRID_RATIOS = [0.25, 0.5, 0.75]
+const AXIS_TICK_RATIOS = [0, 0.25, 0.5, 0.75, 1]
+const TIME_TICK_RATIOS = [0, 0.5, 1]
+const DAY_IN_MS = 24 * 60 * 60 * 1000
 
 function formatKwh(value: number): string {
   return Number.isInteger(value) ? String(value) : value.toFixed(1)
@@ -47,6 +51,19 @@ function formatTime(value: string): string {
   const hour = String(date.getHours()).padStart(2, '0')
   const minute = String(date.getMinutes()).padStart(2, '0')
   return `${month}-${day} ${hour}:${minute}`
+}
+
+function formatAxisTime(timestamp: number, timeRange: number): string {
+  const date = new Date(timestamp)
+  if (Number.isNaN(date.getTime())) return '--'
+  if (timeRange >= DAY_IN_MS) {
+    const month = String(date.getMonth() + 1).padStart(2, '0')
+    const day = String(date.getDate()).padStart(2, '0')
+    return `${month}-${day}`
+  }
+  const hour = String(date.getHours()).padStart(2, '0')
+  const minute = String(date.getMinutes()).padStart(2, '0')
+  return `${hour}:${minute}`
 }
 
 interface ChartMetrics {
@@ -79,6 +96,63 @@ function getChartMetrics(points: HistoryPoint[]): ChartMetrics {
   }
 }
 
+interface YAxisProps {
+  min: number
+  range: number
+  detail?: boolean
+}
+
+function YAxis({ min, range, detail = false }: YAxisProps) {
+  return (
+    <View style={detail ? styles.detailYAxis : styles.yAxis}>
+      {AXIS_TICK_RATIOS.map(ratio => (
+        <Text key={`y-tick-${ratio}`} numberOfLines={1} style={styles.axisText}>
+          {formatKwh(min + (1 - ratio) * range)}度
+        </Text>
+      ))}
+    </View>
+  )
+}
+
+interface TimeAxisProps {
+  points: HistoryPoint[]
+  timeStart: number
+  timeRange: number
+  detail?: boolean
+}
+
+function TimeAxis({ points, timeStart, timeRange, detail = false }: TimeAxisProps) {
+  const axisStyle = detail ? styles.detailTimeAxis : styles.timeAxis
+
+  if (points.length === 1) {
+    return (
+      <View style={axisStyle}>
+        <Text numberOfLines={1} style={[styles.axisText, styles.singleTimeLabel]}>
+          {formatTime(points[0].createdAt)}
+        </Text>
+      </View>
+    )
+  }
+
+  const fallbackTimestamps = points
+    .map(point => Date.parse(point.createdAt))
+    .filter(timestamp => Number.isFinite(timestamp))
+  const fallbackStart = fallbackTimestamps[0] || 0
+  const fallbackEnd = fallbackTimestamps[fallbackTimestamps.length - 1] || fallbackStart
+  const start = timeRange > 0 ? timeStart : fallbackStart
+  const range = timeRange > 0 ? timeRange : Math.max(fallbackEnd - fallbackStart, 0)
+
+  return (
+    <View style={axisStyle}>
+      {TIME_TICK_RATIOS.map(ratio => (
+        <Text key={`time-tick-${ratio}`} numberOfLines={1} style={styles.axisText}>
+          {formatAxisTime(start + ratio * range, range)}
+        </Text>
+      ))}
+    </View>
+  )
+}
+
 function LinePlot({ points, width, height, min, range, timeStart, timeRange, fluid = false, onLayout }: LinePlotProps) {
   const coordinates = useMemo(() => {
     if (!width || points.length === 0) return []
@@ -101,6 +175,13 @@ function LinePlot({ points, width, height, min, range, timeStart, timeRange, flu
       onLayout={onLayout}
       style={[styles.chart, fluid ? styles.chartFluid : null, { height, width: fluid ? undefined : width }]}
     >
+      {GRID_RATIOS.map(ratio => (
+        <View
+          key={`grid-${ratio}`}
+          pointerEvents="none"
+          style={[styles.gridLine, { top: CHART_PADDING + ratio * (height - CHART_PADDING * 2) }]}
+        />
+      ))}
       {coordinates.slice(1).map((point, index) => {
         const previous = coordinates[index]
         const dx = point.x - previous.x
@@ -120,13 +201,16 @@ function LinePlot({ points, width, height, min, range, timeStart, timeRange, flu
         )
       })}
       {coordinates.map((point, index) => {
-        const radius = point.recharged ? 5 : 4
+        const isCurrent = index === coordinates.length - 1
+        if (!point.recharged && !isCurrent) return null
+
+        const markerSize = point.recharged ? 10 : 8
         return (
           <View
             key={`point-${index}`}
-            style={[styles.point, point.recharged && styles.rechargePoint, {
-              left: point.x - radius,
-              top: point.y - radius
+            style={[styles.point, point.recharged ? styles.rechargePoint : styles.currentPoint, {
+              left: point.x - markerSize / 2,
+              top: point.y - markerSize / 2
             }]}
           />
         )
@@ -176,10 +260,7 @@ export function TrendChart({ points }: TrendChartProps) {
           style={styles.preview}
         >
           <View style={styles.chartRow}>
-            <View style={styles.yAxis}>
-              <Text style={styles.axisText}>{formatKwh(previewMetrics.max)}度</Text>
-              <Text style={styles.axisText}>{formatKwh(previewMetrics.min)}度</Text>
-            </View>
+            <YAxis min={previewMetrics.min} range={previewMetrics.range} />
             <LinePlot
               fluid
               height={CHART_HEIGHT}
@@ -192,16 +273,11 @@ export function TrendChart({ points }: TrendChartProps) {
               width={width}
             />
           </View>
-          <View style={styles.timeAxis}>
-            {previewPoints.length === 1 ? (
-              <Text style={[styles.axisText, styles.singleTimeLabel]}>{formatTime(previewPoints[0].createdAt)}</Text>
-            ) : (
-              <>
-                <Text style={styles.axisText}>{formatTime(previewPoints[0].createdAt)}</Text>
-                <Text style={styles.axisText}>{formatTime(previewPoints[previewPoints.length - 1].createdAt)}</Text>
-              </>
-            )}
-          </View>
+          <TimeAxis
+            points={previewPoints}
+            timeRange={previewMetrics.timeRange}
+            timeStart={previewMetrics.timeStart}
+          />
         </Pressable>
       )}
 
@@ -229,10 +305,7 @@ export function TrendChart({ points }: TrendChartProps) {
             <Text style={styles.empty}>暂无趋势数据</Text>
           ) : (
             <View style={styles.detailChartRow}>
-              <View style={styles.detailYAxis}>
-                <Text style={styles.axisText}>{formatKwh(detailMetrics.max)}度</Text>
-                <Text style={styles.axisText}>{formatKwh(detailMetrics.min)}度</Text>
-              </View>
+              <YAxis detail min={detailMetrics.min} range={detailMetrics.range} />
               <ScrollView
                 horizontal
                 ref={detailScrollRef}
@@ -250,16 +323,12 @@ export function TrendChart({ points }: TrendChartProps) {
                     timeStart={detailMetrics.timeStart}
                     width={detailWidth}
                   />
-                  <View style={styles.detailTimeAxis}>
-                    {detailPoints.length === 1 ? (
-                      <Text style={[styles.axisText, styles.singleTimeLabel]}>{formatTime(detailPoints[0].createdAt)}</Text>
-                    ) : (
-                      <>
-                        <Text style={styles.axisText}>{formatTime(detailPoints[0].createdAt)}</Text>
-                        <Text style={styles.axisText}>{formatTime(detailPoints[detailPoints.length - 1].createdAt)}</Text>
-                      </>
-                    )}
-                  </View>
+                  <TimeAxis
+                    detail
+                    points={detailPoints}
+                    timeRange={detailMetrics.timeRange}
+                    timeStart={detailMetrics.timeStart}
+                  />
                 </View>
               </ScrollView>
             </View>
@@ -327,18 +396,30 @@ const styles = StyleSheet.create({
   },
   segment: {
     position: 'absolute',
-    height: 2,
+    height: 3,
+    borderRadius: radii.pill,
     transformOrigin: 'left center',
-    backgroundColor: colors.accent
+    backgroundColor: colors.textSecondary
   },
   rechargeSegment: {
     backgroundColor: colors.recharge
   },
+  gridLine: {
+    position: 'absolute',
+    left: CHART_PADDING,
+    right: CHART_PADDING,
+    height: 1,
+    backgroundColor: 'rgba(20, 24, 32, 0.07)'
+  },
   point: {
     position: 'absolute',
+    borderRadius: radii.pill
+  },
+  currentPoint: {
     width: 8,
     height: 8,
-    borderRadius: radii.pill,
+    borderWidth: 2,
+    borderColor: colors.surface,
     backgroundColor: colors.accent
   },
   rechargePoint: {
