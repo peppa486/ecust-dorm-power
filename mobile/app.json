@@ -13,7 +13,8 @@
     "userInterfaceStyle": "light",
     "newArchEnabled": true,
     "android": {
-      "package": "cc.ecust.power.mobile"
+      "package": "cc.ecust.power.mobile",
+      "googleServicesFile": "./google-services.json"
     },
     "plugins": [
       "expo-background-task",
