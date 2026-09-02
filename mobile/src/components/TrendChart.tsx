@@ -34,6 +34,7 @@ const CHART_PADDING = 10
 const DETAIL_POINT_WIDTH = 14
 const PREVIEW_POINT_LIMIT = 48
 const DETAIL_POINT_LIMIT = 336
+const GRID_RATIOS = [0.25, 0.5, 0.75]
 
 function formatKwh(value: number): string {
   return Number.isInteger(value) ? String(value) : value.toFixed(1)
@@ -101,6 +102,13 @@ function LinePlot({ points, width, height, min, range, timeStart, timeRange, flu
       onLayout={onLayout}
       style={[styles.chart, fluid ? styles.chartFluid : null, { height, width: fluid ? undefined : width }]}
     >
+      {GRID_RATIOS.map(ratio => (
+        <View
+          key={`grid-${ratio}`}
+          pointerEvents="none"
+          style={[styles.gridLine, { top: CHART_PADDING + ratio * (height - CHART_PADDING * 2) }]}
+        />
+      ))}
       {coordinates.slice(1).map((point, index) => {
         const previous = coordinates[index]
         const dx = point.x - previous.x
@@ -120,13 +128,16 @@ function LinePlot({ points, width, height, min, range, timeStart, timeRange, flu
         )
       })}
       {coordinates.map((point, index) => {
-        const radius = point.recharged ? 5 : 4
+        const isCurrent = index === coordinates.length - 1
+        if (!point.recharged && !isCurrent) return null
+
+        const markerSize = point.recharged ? 10 : 8
         return (
           <View
             key={`point-${index}`}
-            style={[styles.point, point.recharged && styles.rechargePoint, {
-              left: point.x - radius,
-              top: point.y - radius
+            style={[styles.point, point.recharged ? styles.rechargePoint : styles.currentPoint, {
+              left: point.x - markerSize / 2,
+              top: point.y - markerSize / 2
             }]}
           />
         )
@@ -327,18 +338,30 @@ const styles = StyleSheet.create({
   },
   segment: {
     position: 'absolute',
-    height: 2,
+    height: 3,
+    borderRadius: radii.pill,
     transformOrigin: 'left center',
-    backgroundColor: colors.accent
+    backgroundColor: colors.textSecondary
   },
   rechargeSegment: {
     backgroundColor: colors.recharge
   },
+  gridLine: {
+    position: 'absolute',
+    left: CHART_PADDING,
+    right: CHART_PADDING,
+    height: 1,
+    backgroundColor: 'rgba(20, 24, 32, 0.07)'
+  },
   point: {
     position: 'absolute',
+    borderRadius: radii.pill
+  },
+  currentPoint: {
     width: 8,
     height: 8,
-    borderRadius: radii.pill,
+    borderWidth: 2,
+    borderColor: colors.surface,
     backgroundColor: colors.accent
   },
   rechargePoint: {
