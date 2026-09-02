@@ -47,6 +47,8 @@ npm run typecheck
 
 依赖已经安装。`npm run prebuild:android` 会生成可由 Android Studio 打开的 `android/` 原生工程；连接 Android 模拟器或真机后可运行 `npm run android`。
 
+直接分享安装包时，优先使用 `arm64-v8a` 版本；较老的 32 位设备使用 `armeabi-v7a` 版本。两个版本功能一致，只需安装其中一个。
+
 ## 已完成验证
 
 - `npx expo install --check`：依赖版本与 Expo SDK 57 对齐。
