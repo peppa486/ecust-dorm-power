@@ -1,8 +1,14 @@
 import express from 'express'
 import helmet from 'helmet'
 import { buildingOptions } from './buildings.js'
-import { requireMobile } from './mobile-auth.js'
+import { requireMobile, requireMobileUpdateAdmin } from './mobile-auth.js'
 import { createRateLimit } from './rate-limit.js'
+import {
+  getMobileUpdate,
+  publishMobileUpdate,
+  registerMobileDevice,
+  removeMobileDevice
+} from './mobile-update.js'
 import {
   getMobileHistory,
   getMobileWatch,
@@ -40,6 +46,45 @@ export function createApp() {
       const building = String(req.body?.building || '')
       const room = String(req.body?.room || '')
       res.json(await queryPower(campus, building, room))
+    } catch (error) {
+      next(error)
+    }
+  })
+
+  app.get('/api/mobile/update', async (_req, res, next) => {
+    try {
+      res.set('Cache-Control', 'no-store')
+      res.json({ update: await getMobileUpdate() })
+    } catch (error) {
+      next(error)
+    }
+  })
+
+  app.post('/api/mobile/device', createRateLimit({ max: 30 }), requireMobile, async (req, res, next) => {
+    try {
+      const device = await registerMobileDevice(req.mobileTokenHash, {
+        appVersion: req.body?.appVersion,
+        appVersionCode: req.body?.appVersionCode,
+        pushToken: req.body?.pushToken
+      })
+      res.json({ device })
+    } catch (error) {
+      next(error)
+    }
+  })
+
+  app.delete('/api/mobile/device', createRateLimit({ max: 10 }), requireMobile, async (req, res, next) => {
+    try {
+      await removeMobileDevice(req.mobileTokenHash)
+      res.json({ ok: true })
+    } catch (error) {
+      next(error)
+    }
+  })
+
+  app.post('/api/admin/mobile-update', createRateLimit({ max: 5 }), requireMobileUpdateAdmin, async (req, res, next) => {
+    try {
+      res.json(await publishMobileUpdate(req.body))
     } catch (error) {
       next(error)
     }

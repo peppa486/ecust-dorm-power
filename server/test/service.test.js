@@ -17,6 +17,12 @@ const {
   saveMobileWatch,
   storeSnapshot
 } = await import('../src/service.js')
+const {
+  cleanupMobileDevices,
+  getMobileUpdate,
+  publishMobileUpdate,
+  registerMobileDevice
+} = await import('../src/mobile-update.js')
 const { hashMobileToken } = await import('../src/mobile-auth.js')
 
 const db = await getDb()
@@ -33,7 +39,7 @@ function power(campus, building, room, kwh) {
 }
 
 async function clearData() {
-  await db.exec('DELETE FROM mobile_watches; DELETE FROM snapshots;')
+  await db.exec('DELETE FROM mobile_watches; DELETE FROM mobile_devices; DELETE FROM mobile_updates; DELETE FROM snapshots;')
 }
 
 after(async () => {
@@ -177,4 +183,44 @@ test('stale mobile watches are removed so abandoned rooms stop being polled', as
   assert.equal(await cleanupMobileWatches(30), 1)
   assert.equal((await db.get('SELECT COUNT(*) AS count FROM mobile_watches WHERE token_hash=?', tokenHash)).count, 0)
   assert.equal((await db.get('SELECT COUNT(*) AS count FROM snapshots WHERE room_key=?', '奉贤:5:214')).count, 0)
+})
+
+test('mobile devices receive a published update independently of room monitoring', async () => {
+  const tokenHash = hashMobileToken('H'.repeat(48))
+  await registerMobileDevice(tokenHash, {
+    appVersion: '1.1.0',
+    appVersionCode: 2,
+    pushToken: 'ExponentPushToken[device]'
+  })
+
+  const notifications = []
+  const result = await publishMobileUpdate({
+    version: '1.2.0',
+    versionCode: 3,
+    downloadUrl: 'https://github.com/peppa486/ecust-dorm-power/releases/latest',
+    releaseNotes: '加入版本更新提醒。',
+    sha256: 'A'.repeat(64)
+  }, {
+    mobileSendUpdateNotification: async (pushToken, update) => {
+      notifications.push({ pushToken, version: update.version })
+    }
+  })
+
+  assert.deepEqual(notifications, [{ pushToken: 'ExponentPushToken[device]', version: '1.2.0' }])
+  assert.equal(result.notified, 1)
+  assert.equal(result.failed, 0)
+  assert.equal((await getMobileUpdate()).version, '1.2.0')
+})
+
+test('stale mobile devices are removed', async () => {
+  const tokenHash = hashMobileToken('I'.repeat(48))
+  await registerMobileDevice(tokenHash, { appVersion: '1.1.0', appVersionCode: 2 })
+  await db.run(
+    'UPDATE mobile_devices SET last_seen_at=? WHERE token_hash=?',
+    new Date(Date.now() - 91 * 24 * 60 * 60 * 1000).toISOString(),
+    tokenHash
+  )
+
+  assert.equal(await cleanupMobileDevices(90), 1)
+  assert.equal((await db.get('SELECT COUNT(*) AS count FROM mobile_devices WHERE token_hash=?', tokenHash)).count, 0)
 })

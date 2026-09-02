@@ -54,6 +54,16 @@ export interface MobileHistoryResponse {
   items: MobileHistoryPoint[]
 }
 
+export interface MobileUpdate {
+  version: string
+  versionCode: number
+  downloadUrl: string
+  releaseNotes: string
+  forceUpdate: boolean
+  sha256: string | null
+  publishedAt: string
+}
+
 export interface ApiErrorBody {
   error?: string
 }

@@ -11,7 +11,8 @@
     "start": "node src/index.js",
     "test": "node --test",
     "check": "node scripts/check.mjs",
-    "smoke": "node scripts/smoke.mjs"
+    "smoke": "node scripts/smoke.mjs",
+    "notify:update": "node scripts/notify-mobile-update.mjs"
   },
   "dependencies": {
     "axios": "1.19.0",

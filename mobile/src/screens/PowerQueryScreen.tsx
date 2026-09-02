@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import {
+  AppState,
   ActivityIndicator,
+  Linking,
   SafeAreaView,
   ScrollView,
   StyleSheet,
@@ -12,7 +14,9 @@ import {
   ApiError,
   getBuildings,
   getMobileHistory,
+  getMobileUpdate,
   queryPower,
+  registerMobileDevice,
   registerMobileWatch,
   removeMobileWatch
 } from '../api/client'
@@ -22,6 +26,7 @@ import { QueryCard } from '../components/QueryCard'
 import { ResultCard } from '../components/ResultCard'
 import { StateCard } from '../components/StateCard'
 import { TrendChart } from '../components/TrendChart'
+import { UpdateCard } from '../components/UpdateCard'
 import {
   getRemotePushToken,
   requestNotificationAccess,
@@ -45,10 +50,12 @@ import {
   type BuildingOption,
   type Campus,
   type MobileHistoryPoint,
+  type MobileUpdate,
   type PowerResult,
   type QueryPayload
 } from '../types/api'
 import { colors, radii, spacing } from '../theme'
+import { getInstalledAppVersion, isUpdateAvailable } from '../update/version'
 import { isValidRoom, normalizeRoomInput } from '../utils/power'
 
 type CampusMap<T> = Record<Campus, T>
@@ -118,6 +125,9 @@ export function PowerQueryScreen() {
   const [monitorError, setMonitorError] = useState<string | null>(null)
   const [monitorBusy, setMonitorBusy] = useState(false)
   const [pickerVisible, setPickerVisible] = useState(false)
+  const [availableUpdate, setAvailableUpdate] = useState<MobileUpdate | null>(null)
+  const [updateBusy, setUpdateBusy] = useState(false)
+  const [updateError, setUpdateError] = useState<string | null>(null)
 
   const mountedRef = useRef(true)
   const campusRef = useRef<Campus>(CAMPUSES[0])
@@ -125,6 +135,7 @@ export function PowerQueryScreen() {
   const buildingRequestIds = useRef<CampusMap<number>>({ 奉贤: 0, 徐汇: 0 })
   const persistenceQueue = useRef<Promise<void>>(Promise.resolve())
   const mobileTokenRef = useRef<string | null>(null)
+  const dismissedUpdateVersionRef = useRef<string | null>(null)
 
   campusRef.current = campus
   preferencesRef.current = preferences
@@ -155,6 +166,40 @@ export function PowerQueryScreen() {
       }
     })
   }, [updatePreferences])
+
+  const checkForUpdate = useCallback(async () => {
+    try {
+      const latest = await getMobileUpdate()
+      const installed = getInstalledAppVersion()
+      if (!mountedRef.current) return
+
+      if (
+        latest
+        && isUpdateAvailable(installed, latest)
+        && (latest.forceUpdate || dismissedUpdateVersionRef.current !== latest.version)
+      ) {
+        setAvailableUpdate(latest)
+        return
+      }
+      if (!latest || !isUpdateAvailable(installed, latest)) setAvailableUpdate(null)
+    } catch {
+      // Update checks are best-effort and must never block querying power.
+    }
+  }, [])
+
+  const syncMobileDevice = useCallback(async (knownPushToken?: string | null): Promise<string | null> => {
+    const token = mobileTokenRef.current || await getMobileInstallationToken()
+    mobileTokenRef.current = token
+    const installed = getInstalledAppVersion()
+    const pushToken = knownPushToken === undefined ? await getRemotePushToken() : knownPushToken
+    await registerMobileDevice(
+      token,
+      installed.version,
+      installed.versionCode,
+      pushToken || undefined
+    )
+    return pushToken
+  }, [])
 
   const syncServerWatch = useCallback(async (
     roomToWatch: QueryPayload,
@@ -213,6 +258,8 @@ export function PowerQueryScreen() {
     let active = true
 
     async function restore() {
+      void checkForUpdate()
+      void syncMobileDevice().catch(() => undefined)
       const stored = await loadPreferences()
       if (!active || !mountedRef.current) return
 
@@ -268,7 +315,16 @@ export function PowerQueryScreen() {
       active = false
       mountedRef.current = false
     }
-  }, [loadBuildings])
+  }, [checkForUpdate, loadBuildings, syncMobileDevice, syncServerWatch])
+
+  useEffect(() => {
+    const subscription = AppState.addEventListener('change', nextState => {
+      if (nextState !== 'active') return
+      void checkForUpdate()
+      void syncMobileDevice().catch(() => undefined)
+    })
+    return () => subscription.remove()
+  }, [checkForUpdate, syncMobileDevice])
 
   const currentBuildings = buildingsByCampus[campus]
   const currentBuildingsLoading = hydrating || buildingsLoading[campus]
@@ -458,6 +514,7 @@ export function PowerQueryScreen() {
           notificationsEnabled: true
         }
         const pushToken = await getRemotePushToken()
+        await syncMobileDevice(pushToken).catch(() => undefined)
         const serverHistory = await syncServerWatch(roomToMonitor, nextPreferences, pushToken || undefined)
         updatePreferences({ monitoringEnabled: true, notificationsEnabled: true })
         await persistenceQueue.current
@@ -476,7 +533,27 @@ export function PowerQueryScreen() {
     } finally {
       if (mountedRef.current) setMonitorBusy(false)
     }
-  }, [syncServerWatch, updatePreferences])
+  }, [syncMobileDevice, syncServerWatch, updatePreferences])
+
+  const handleUpdateInstall = useCallback(async () => {
+    if (!availableUpdate) return
+    setUpdateBusy(true)
+    setUpdateError(null)
+    try {
+      await Linking.openURL(availableUpdate.downloadUrl)
+    } catch {
+      if (mountedRef.current) setUpdateError('无法打开下载地址，请稍后再试')
+    } finally {
+      if (mountedRef.current) setUpdateBusy(false)
+    }
+  }, [availableUpdate])
+
+  const handleUpdateDismiss = useCallback(() => {
+    if (!availableUpdate) return
+    dismissedUpdateVersionRef.current = availableUpdate.version
+    setAvailableUpdate(null)
+    setUpdateError(null)
+  }, [availableUpdate])
 
   const showBuildingEmpty = !hydrating && !currentBuildingsLoading && !currentBuildingsError && currentBuildings.length === 0
 
@@ -491,6 +568,16 @@ export function PowerQueryScreen() {
           <View style={styles.hero}>
             <Text style={styles.title}>华理宿舍电量查询</Text>
           </View>
+
+          {availableUpdate ? (
+            <UpdateCard
+              update={availableUpdate}
+              busy={updateBusy}
+              error={updateError}
+              onInstall={() => void handleUpdateInstall()}
+              onDismiss={handleUpdateDismiss}
+            />
+          ) : null}
 
           <QueryCard
             campus={campus}

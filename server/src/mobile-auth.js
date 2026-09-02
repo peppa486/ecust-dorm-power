@@ -22,3 +22,26 @@ export function requireMobile(req, res, next) {
     res.status(401).json({ error: '移动设备未登记' })
   }
 }
+
+function readBearerToken(req) {
+  const header = req.headers.authorization
+  if (typeof header !== 'string' || !header.startsWith('Bearer ')) return ''
+  return header.slice('Bearer '.length).trim()
+}
+
+export function requireMobileUpdateAdmin(req, res, next) {
+  const expected = process.env.MOBILE_UPDATE_ADMIN_TOKEN
+  const provided = readBearerToken(req)
+  const valid = typeof expected === 'string'
+    && expected.length > 0
+    && provided.length === expected.length
+    && crypto.timingSafeEqual(Buffer.from(provided), Buffer.from(expected))
+
+  if (!valid) {
+    res.status(expected ? 401 : 503).json({
+      error: expected ? '更新推送鉴权失败' : '更新推送尚未配置'
+    })
+    return
+  }
+  next()
+}

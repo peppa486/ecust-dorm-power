@@ -3,6 +3,7 @@ import type {
   BuildingsResponse,
   Campus,
   MobileHistoryResponse,
+  MobileUpdate,
   MobileWatch,
   PowerResult,
   QueryPayload
@@ -108,6 +109,42 @@ function isMobileWatch(value: unknown): value is MobileWatch {
     && typeof value.threshold === 'number'
     && typeof value.notificationsEnabled === 'boolean'
     && typeof value.displayName === 'string'
+}
+
+function isMobileUpdate(value: unknown): value is MobileUpdate {
+  return isRecord(value)
+    && typeof value.version === 'string'
+    && typeof value.versionCode === 'number'
+    && Number.isSafeInteger(value.versionCode)
+    && typeof value.downloadUrl === 'string'
+    && value.downloadUrl.startsWith('https://')
+    && typeof value.releaseNotes === 'string'
+    && typeof value.forceUpdate === 'boolean'
+    && (value.sha256 === null || typeof value.sha256 === 'string')
+    && typeof value.publishedAt === 'string'
+}
+
+export async function getMobileUpdate(): Promise<MobileUpdate | null> {
+  const data = await request<{ update: MobileUpdate | null }>('/api/mobile/update')
+  if (data?.update === null) return null
+  if (!isMobileUpdate(data?.update)) throw new ApiError('更新信息格式异常')
+  return data.update
+}
+
+export async function registerMobileDevice(
+  token: string,
+  appVersion: string,
+  appVersionCode: number,
+  pushToken?: string | null
+): Promise<void> {
+  const body: Record<string, unknown> = { appVersion, appVersionCode }
+  if (pushToken !== undefined) body.pushToken = pushToken
+
+  await request<{ device: unknown }>('/api/mobile/device', {
+    method: 'POST',
+    headers: mobileHeaders(token),
+    body: JSON.stringify(body)
+  })
 }
 
 export async function registerMobileWatch(
