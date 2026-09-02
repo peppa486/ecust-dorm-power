@@ -18,6 +18,12 @@
     "plugins": [
       "expo-background-task",
       "expo-notifications"
-    ]
+    ],
+    "extra": {
+      "eas": {
+        "projectId": "6e66483b-eedc-4e2d-b73c-4ae27d9b2d46"
+      }
+    },
+    "owner": "peppa79486"
   }
 }

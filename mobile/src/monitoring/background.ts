@@ -1,5 +1,6 @@
 import { Platform } from 'react-native'
 import * as BackgroundTask from 'expo-background-task'
+import Constants from 'expo-constants'
 import * as Notifications from 'expo-notifications'
 import * as TaskManager from 'expo-task-manager'
 
@@ -38,10 +39,13 @@ export async function getRemotePushToken(): Promise<string | null> {
     const permission = await Notifications.getPermissionsAsync()
     if (permission.status !== 'granted') return null
 
-    const token = await Notifications.getExpoPushTokenAsync()
+    const projectId = Constants.expoConfig?.extra?.eas?.projectId
+    if (!projectId) return null
+
+    const token = await Notifications.getExpoPushTokenAsync({ projectId })
     return typeof token.data === 'string' ? token.data : null
   } catch {
-    // A project ID and Android push credentials are optional for local monitoring.
+    // Push credentials are optional for local monitoring; the server still samples.
     return null
   }
 }
