@@ -32,3 +32,8 @@ yarn-error.*
 # Never upload a server credential; the Android client config is intentionally kept
 # in the build context for googleServicesFile.
 *firebase-adminsdk*.json
+
+# These are local-only because they contain Firebase client configuration, but
+# the native Android build needs both of them when EAS runs from this directory.
+!google-services.json
+!android/app/google-services.json
