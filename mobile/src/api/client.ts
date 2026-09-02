@@ -2,6 +2,8 @@ import type {
   ApiErrorBody,
   BuildingsResponse,
   Campus,
+  MobileHistoryResponse,
+  MobileWatch,
   PowerResult,
   QueryPayload
 } from '../types/api'
@@ -92,4 +94,58 @@ export async function queryPower(payload: QueryPayload): Promise<PowerResult> {
     throw new ApiError('电量数据格式异常')
   }
   return data
+}
+
+function mobileHeaders(token: string): HeadersInit {
+  return { 'X-Mobile-Token': token }
+}
+
+function isMobileWatch(value: unknown): value is MobileWatch {
+  return isRecord(value)
+    && typeof value.campus === 'string'
+    && typeof value.building === 'string'
+    && typeof value.room === 'string'
+    && typeof value.threshold === 'number'
+    && typeof value.notificationsEnabled === 'boolean'
+    && typeof value.displayName === 'string'
+}
+
+export async function registerMobileWatch(
+  token: string,
+  room: QueryPayload,
+  threshold: number,
+  notificationsEnabled: boolean,
+  pushToken?: string | null
+): Promise<MobileWatch> {
+  const body: Record<string, unknown> = {
+    ...room,
+    threshold,
+    notificationsEnabled
+  }
+  if (pushToken !== undefined) body.pushToken = pushToken
+
+  const data = await request<{ watch: MobileWatch }>('/api/mobile/watch', {
+    method: 'POST',
+    headers: mobileHeaders(token),
+    body: JSON.stringify(body)
+  })
+  if (!isMobileWatch(data?.watch)) throw new ApiError('服务器监控数据格式异常')
+  return data.watch
+}
+
+export async function getMobileHistory(token: string): Promise<MobileHistoryResponse> {
+  const data = await request<MobileHistoryResponse>('/api/mobile/history', {
+    headers: mobileHeaders(token)
+  })
+  if (!isMobileWatch(data?.watch) || !Array.isArray(data?.items)) {
+    throw new ApiError('服务器趋势数据格式异常')
+  }
+  return data
+}
+
+export async function removeMobileWatch(token: string): Promise<void> {
+  await request<{ ok: boolean }>('/api/mobile/watch', {
+    method: 'DELETE',
+    headers: mobileHeaders(token)
+  })
 }

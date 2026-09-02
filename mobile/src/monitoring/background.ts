@@ -31,6 +31,21 @@ export async function requestNotificationAccess(): Promise<boolean> {
   return permission.status === 'granted'
 }
 
+export async function getRemotePushToken(): Promise<string | null> {
+  if (Platform.OS !== 'android') return null
+
+  try {
+    const permission = await Notifications.getPermissionsAsync()
+    if (permission.status !== 'granted') return null
+
+    const token = await Notifications.getExpoPushTokenAsync()
+    return typeof token.data === 'string' ? token.data : null
+  } catch {
+    // A project ID and Android push credentials are optional for local monitoring.
+    return null
+  }
+}
+
 export async function sendLowPowerNotification(kwh: number, threshold: number): Promise<void> {
   await ensureNotificationChannel()
   const permission = await Notifications.getPermissionsAsync()

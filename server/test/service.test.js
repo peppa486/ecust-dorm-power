@@ -9,15 +9,15 @@ process.env.DB_PATH = path.join(tempDir, 'power.sqlite')
 
 const { closeDb, getDb } = await import('../src/db.js')
 const {
-  addSubscriptionCredit,
-  getHistory,
+  cleanupMobileWatches,
+  getMobileHistory,
   pollWatches,
   queryPower,
-  removeWatch,
-  saveWatch,
+  removeMobileWatch,
+  saveMobileWatch,
   storeSnapshot
 } = await import('../src/service.js')
-const { WeChatSendError } = await import('../src/wechat.js')
+const { hashMobileToken } = await import('../src/mobile-auth.js')
 
 const db = await getDb()
 
@@ -33,7 +33,7 @@ function power(campus, building, room, kwh) {
 }
 
 async function clearData() {
-  await db.exec('DELETE FROM watches; DELETE FROM snapshots; DELETE FROM sessions;')
+  await db.exec('DELETE FROM mobile_watches; DELETE FROM snapshots;')
 }
 
 after(async () => {
@@ -61,92 +61,120 @@ test('ordinary queries coalesce and do not create history', async () => {
   assert.equal((await db.get('SELECT COUNT(*) AS count FROM snapshots')).count, 0)
 })
 
-test('same-room watchers share one snapshot and cleanup happens after the last removal', async () => {
+test('mobile watches share one snapshot and cleanup happens after the last removal', async () => {
+  const firstToken = hashMobileToken('A'.repeat(48))
+  const secondToken = hashMobileToken('B'.repeat(48))
   const provider = async (campus, building, room) => power(campus, building, room, 20)
-  await saveWatch('user-1', '奉贤', '5', '205', 15, { provider })
-  await saveWatch('user-2', '奉贤', '5', '205', 15, { provider })
+  await saveMobileWatch(firstToken, '奉贤', '5', '205', 15, false, undefined, { provider })
+  await saveMobileWatch(secondToken, '奉贤', '5', '205', 15, false, undefined, { provider })
 
   assert.equal((await db.get('SELECT COUNT(*) AS count FROM snapshots')).count, 1)
-  await removeWatch('user-1')
+  await removeMobileWatch(firstToken)
   assert.equal((await db.get('SELECT COUNT(*) AS count FROM snapshots')).count, 1)
-  await removeWatch('user-2')
+  await removeMobileWatch(secondToken)
   assert.equal((await db.get('SELECT COUNT(*) AS count FROM snapshots')).count, 0)
 })
 
-test('changing rooms preserves history for another watcher', async () => {
-  const provider = async (campus, building, room) => power(campus, building, room, 20)
-  await saveWatch('user-1', '奉贤', '5', '206', 15, { provider })
-  await saveWatch('user-2', '奉贤', '5', '206', 15, { provider })
-  await saveWatch('user-1', '奉贤', '5', '207', 15, { provider })
-
-  assert.equal((await db.get('SELECT COUNT(*) AS count FROM snapshots WHERE room_key=?', '奉贤:5:206')).count, 1)
-  await removeWatch('user-2')
-  assert.equal((await db.get('SELECT COUNT(*) AS count FROM snapshots WHERE room_key=?', '奉贤:5:206')).count, 0)
-  await removeWatch('user-1')
-  assert.equal((await db.get('SELECT COUNT(*) AS count FROM snapshots WHERE room_key=?', '奉贤:5:207')).count, 0)
-})
-
-test('polling one room notifies all watchers and prevents re-entry', async () => {
-  const provider = async (campus, building, room) => {
-    await new Promise(resolve => setTimeout(resolve, 15))
-    return power(campus, building, room, 10)
-  }
-  await saveWatch('user-1', '徐汇', '3', '301', 15, { provider: async (...args) => power(...args, 20) })
-  await saveWatch('user-2', '徐汇', '3', '301', 15, { provider: async (...args) => power(...args, 20) })
-  await db.run('UPDATE watches SET credits=1,alerted=0 WHERE campus=? AND building=? AND room=?', '徐汇', '3', '301')
+test('polling one room samples once and notifies all mobile watchers', async () => {
+  const firstToken = hashMobileToken('C'.repeat(48))
+  const secondToken = hashMobileToken('D'.repeat(48))
+  const setupProvider = async (...args) => power(...args, 20)
+  await saveMobileWatch(firstToken, '徐汇', '3', '301', 15, true, 'ExponentPushToken[first]', { provider: setupProvider })
+  await saveMobileWatch(secondToken, '徐汇', '3', '301', 15, true, 'ExponentPushToken[second]', { provider: setupProvider })
+  await db.run(
+    'UPDATE snapshots SET created_at=? WHERE room_key=?',
+    new Date(Date.now() - 60 * 60 * 1000).toISOString(),
+    '徐汇:3:301'
+  )
 
   let calls = 0
   const notifications = []
-  const sendNotification = async (openid) => {
-    notifications.push(openid)
+  const pollOptions = {
+    powerProvider: async (...args) => {
+      calls += 1
+      return power(...args, 10)
+    },
+    mobileSendNotification: async (pushToken, watch, kwh) => {
+      notifications.push({ pushToken, room: watch.room, kwh })
+    }
   }
-  const countingProvider = async (...args) => {
-    calls += 1
-    return provider(...args)
-  }
-  await Promise.all([
-    pollWatches({ powerProvider: countingProvider, sendNotification }),
-    pollWatches({ powerProvider: countingProvider, sendNotification })
-  ])
+  await Promise.all([pollWatches(pollOptions), pollWatches(pollOptions)])
 
   assert.equal(calls, 1)
-  assert.deepEqual(notifications.sort(), ['user-1', 'user-2'])
-  const rows = await db.all('SELECT credits,alerted FROM watches ORDER BY openid')
-  assert.deepEqual(rows, [{ credits: 0, alerted: 1 }, { credits: 0, alerted: 1 }])
+  assert.deepEqual(notifications.sort((left, right) => left.pushToken.localeCompare(right.pushToken)), [
+    { pushToken: 'ExponentPushToken[first]', room: '301', kwh: 10 },
+    { pushToken: 'ExponentPushToken[second]', room: '301', kwh: 10 }
+  ])
+  const rows = await db.all('SELECT alerted FROM mobile_watches ORDER BY token_hash')
+  assert.deepEqual(rows, [{ alerted: 1 }, { alerted: 1 }])
 })
 
-test('43101 clears credits while 47003 keeps them', async () => {
-  const provider = async (campus, building, room) => power(campus, building, room, 10)
-  await saveWatch('user-43101', '奉贤', '5', '208', 15, { provider: async (...args) => power(...args, 20) })
-  await db.run('UPDATE watches SET credits=1 WHERE openid=?', 'user-43101')
-  await pollWatches({
-    powerProvider: provider,
-    sendNotification: async () => { throw new WeChatSendError(43101, 'no credit') }
+test('mobile watches are sampled and history is available without the app running', async () => {
+  const tokenHash = hashMobileToken('E'.repeat(48))
+  let calls = 0
+  await saveMobileWatch(tokenHash, '奉贤', '5', '212', 15, false, undefined, {
+    provider: async (...args) => {
+      calls += 1
+      return power(...args, calls === 1 ? 17.7 : 11.6)
+    }
   })
-  assert.equal((await db.get('SELECT credits FROM watches WHERE openid=?', 'user-43101')).credits, 0)
+  await db.run(
+    'UPDATE snapshots SET created_at=? WHERE room_key=?',
+    new Date(Date.now() - 60 * 60 * 1000).toISOString(),
+    '奉贤:5:212'
+  )
 
-  await clearData()
-  await saveWatch('user-47003', '奉贤', '5', '209', 15, { provider: async (...args) => power(...args, 20) })
-  await db.run('UPDATE watches SET credits=1 WHERE openid=?', 'user-47003')
   await pollWatches({
-    powerProvider: provider,
-    sendNotification: async () => { throw new WeChatSendError(47003, 'bad template') }
+    powerProvider: async (...args) => {
+      calls += 1
+      return power(...args, 11.6)
+    }
   })
-  assert.equal((await db.get('SELECT credits FROM watches WHERE openid=?', 'user-47003')).credits, 1)
+
+  const history = await getMobileHistory(tokenHash)
+  assert.equal(calls, 2)
+  assert.equal(history.items.length, 2)
+  assert.equal(history.items.at(-1).kwh, 11.6)
+  assert.equal(history.items.at(-1).recharged, false)
 })
 
-test('history is available only for a watched room', async () => {
-  await assert.rejects(() => getHistory('missing-user'), /还没有设置/)
-  await storeSnapshot(power('奉贤', '5', '210', 12))
-  await assert.rejects(() => getHistory('missing-user'), /还没有设置/)
+test('mobile notifications send once and re-arm after a recharge', async () => {
+  const tokenHash = hashMobileToken('F'.repeat(48))
+  await saveMobileWatch(tokenHash, '奉贤', '5', '213', 15, true, 'ExponentPushToken[test]', {
+    provider: async (...args) => power(...args, 20)
+  })
+  await db.run(
+    'UPDATE snapshots SET created_at=? WHERE room_key=?',
+    new Date(Date.now() - 60 * 60 * 1000).toISOString(),
+    '奉贤:5:213'
+  )
+  const notifications = []
+  const poll = kwh => pollWatches({
+    powerProvider: async (...args) => power(...args, kwh),
+    mobileSendNotification: async (_pushToken, _watch, value) => notifications.push(value)
+  })
+
+  await poll(10)
+  await poll(10)
+  await poll(20)
+  await poll(10)
+
+  assert.deepEqual(notifications, [10, 10])
+  assert.equal((await db.get('SELECT alerted FROM mobile_watches WHERE token_hash=?', tokenHash)).alerted, 1)
 })
 
-test('subscription credit updates the threshold and re-arms an alert', async () => {
-  const provider = async (campus, building, room) => power(campus, building, room, 20)
-  await saveWatch('user-subscription', '奉贤', '5', '211', 15, { provider })
-  await db.run('UPDATE watches SET alerted=1 WHERE openid=?', 'user-subscription')
-  const watch = await addSubscriptionCredit('user-subscription', 10)
-  assert.equal(watch.threshold, 10)
-  assert.equal(watch.credits, 1)
-  assert.equal(watch.alerted, 0)
+test('stale mobile watches are removed so abandoned rooms stop being polled', async () => {
+  const tokenHash = hashMobileToken('G'.repeat(48))
+  await saveMobileWatch(tokenHash, '奉贤', '5', '214', 15, false, undefined, {
+    provider: async (...args) => power(...args, 20)
+  })
+  await db.run(
+    'UPDATE mobile_watches SET updated_at=? WHERE token_hash=?',
+    new Date(Date.now() - 31 * 24 * 60 * 60 * 1000).toISOString(),
+    tokenHash
+  )
+
+  assert.equal(await cleanupMobileWatches(30), 1)
+  assert.equal((await db.get('SELECT COUNT(*) AS count FROM mobile_watches WHERE token_hash=?', tokenHash)).count, 0)
+  assert.equal((await db.get('SELECT COUNT(*) AS count FROM snapshots WHERE room_key=?', '奉贤:5:214')).count, 0)
 })

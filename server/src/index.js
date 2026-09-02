@@ -1,9 +1,8 @@
 import 'dotenv/config'
 import cron from 'node-cron'
 import { createApp } from './app.js'
-import { cleanupSessions } from './auth.js'
 import { closeDb, getDb } from './db.js'
-import { cleanupSnapshots, pollWatches } from './service.js'
+import { cleanupMobileWatches, cleanupSnapshots, pollWatches } from './service.js'
 
 const port = Number(process.env.PORT || 8787)
 await getDb()
@@ -26,7 +25,7 @@ cron.schedule('7 * * * *', async () => {
 })
 cron.schedule('23 4 * * *', async () => {
   try {
-    await cleanupSessions()
+    await cleanupMobileWatches()
     await cleanupSnapshots()
   } catch (error) {
     console.error(error)

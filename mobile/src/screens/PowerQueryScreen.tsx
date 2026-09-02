@@ -8,15 +8,28 @@ import {
   View
 } from 'react-native'
 
-import { ApiError, getBuildings, queryPower } from '../api/client'
+import {
+  ApiError,
+  getBuildings,
+  getMobileHistory,
+  queryPower,
+  registerMobileWatch,
+  removeMobileWatch
+} from '../api/client'
 import { BuildingPickerModal } from '../components/BuildingPickerModal'
 import { MonitorCard } from '../components/MonitorCard'
 import { QueryCard } from '../components/QueryCard'
 import { ResultCard } from '../components/ResultCard'
 import { StateCard } from '../components/StateCard'
 import { TrendChart } from '../components/TrendChart'
-import { requestNotificationAccess, runMonitorNow, syncHourlyMonitor } from '../monitoring/background'
+import {
+  getRemotePushToken,
+  requestNotificationAccess,
+  runMonitorNow,
+  syncHourlyMonitor
+} from '../monitoring/background'
 import { appendHistory, clearHistory, loadHistory, type HistoryPoint } from '../storage/history'
+import { getMobileInstallationToken } from '../storage/mobileIdentity'
 import {
   createDefaultPreferences,
   loadPreferences,
@@ -27,7 +40,14 @@ import {
   type RoomSelection,
   type StoredPreferences
 } from '../storage/preferences'
-import { CAMPUSES, type BuildingOption, type Campus, type PowerResult, type QueryPayload } from '../types/api'
+import {
+  CAMPUSES,
+  type BuildingOption,
+  type Campus,
+  type MobileHistoryPoint,
+  type PowerResult,
+  type QueryPayload
+} from '../types/api'
 import { colors, radii, spacing } from '../theme'
 import { isValidRoom, normalizeRoomInput } from '../utils/power'
 
@@ -62,6 +82,26 @@ function roomPayload(campus: Campus, building: string, room: string): QueryPaylo
   return { campus, building, room }
 }
 
+function asHistoryPoints(items: MobileHistoryPoint[]): HistoryPoint[] {
+  return items.map(item => ({
+    kwh: item.kwh,
+    createdAt: item.createdAt,
+    recharged: item.recharged
+  }))
+}
+
+function mergeHistory(...lists: HistoryPoint[][]): HistoryPoint[] {
+  const byKey = new Map<string, HistoryPoint>()
+  for (const list of lists) {
+    for (const point of list) {
+      byKey.set(`${point.createdAt}:${point.kwh}`, point)
+    }
+  }
+  return Array.from(byKey.values())
+    .sort((left, right) => Date.parse(left.createdAt) - Date.parse(right.createdAt))
+    .slice(-336)
+}
+
 export function PowerQueryScreen() {
   const [preferences, setPreferences] = useState<StoredPreferences>(() => createDefaultPreferences())
   const [hydrating, setHydrating] = useState(true)
@@ -84,6 +124,7 @@ export function PowerQueryScreen() {
   const preferencesRef = useRef(preferences)
   const buildingRequestIds = useRef<CampusMap<number>>({ 奉贤: 0, 徐汇: 0 })
   const persistenceQueue = useRef<Promise<void>>(Promise.resolve())
+  const mobileTokenRef = useRef<string | null>(null)
 
   campusRef.current = campus
   preferencesRef.current = preferences
@@ -114,6 +155,24 @@ export function PowerQueryScreen() {
       }
     })
   }, [updatePreferences])
+
+  const syncServerWatch = useCallback(async (
+    roomToWatch: QueryPayload,
+    nextPreferences: StoredPreferences,
+    pushToken?: string
+  ): Promise<HistoryPoint[]> => {
+    const token = mobileTokenRef.current || await getMobileInstallationToken()
+    mobileTokenRef.current = token
+    await registerMobileWatch(
+      token,
+      roomToWatch,
+      nextPreferences.threshold,
+      nextPreferences.notificationsEnabled,
+      pushToken
+    )
+    const remoteHistory = await getMobileHistory(token)
+    return asHistoryPoints(remoteHistory.items)
+  }, [])
 
   const loadBuildings = useCallback(async (targetCampus: Campus, preferredBuilding = '') => {
     const requestId = buildingRequestIds.current[targetCampus] + 1
@@ -174,20 +233,33 @@ export function PowerQueryScreen() {
       if (active && mountedRef.current) setHydrating(false)
 
       if (stored.myRoom) {
+        let serverHistory: HistoryPoint[] = []
+        try {
+          const pushToken = stored.notificationsEnabled ? await getRemotePushToken() : null
+          serverHistory = await syncServerWatch(stored.myRoom, stored, pushToken || undefined)
+        } catch {
+          if (stored.monitoringEnabled && active && mountedRef.current) {
+            setMonitorError('服务器监控暂时未连接，将在下次打开应用时重试')
+          }
+        }
+
         try {
           const initialResult = await queryPower(stored.myRoom)
           if (!active || !mountedRef.current) return
           setResult(initialResult)
-          setHistory(await appendHistory(stored.myRoom, initialResult.kwh, initialResult.updatedAt))
+          const localHistory = await appendHistory(stored.myRoom, initialResult.kwh, initialResult.updatedAt)
+          setHistory(mergeHistory(serverHistory, localHistory))
         } catch {
-          // 保留本地趋势，首页仍可继续手动查询。
+          if (active && mountedRef.current) setHistory(mergeHistory(serverHistory, restoredHistory))
         }
       }
 
       try {
         await syncHourlyMonitor(Boolean(stored.myRoom && stored.monitoringEnabled))
       } catch (error) {
-        if (active && mountedRef.current) setMonitorError(errorMessage(error, '后台监控不可用'))
+        if (active && mountedRef.current) {
+          setMonitorError(stored.myRoom ? '本地后台任务不可用，服务器仍会继续记录' : errorMessage(error, '后台监控不可用'))
+        }
       }
     }
 
@@ -270,7 +342,8 @@ export function PowerQueryScreen() {
       setResult(data)
       if (sameRoom(preferencesRef.current.myRoom, payload)) {
         try {
-          setHistory(await appendHistory(payload, data.kwh, data.updatedAt))
+          const localHistory = await appendHistory(payload, data.kwh, data.updatedAt)
+          setHistory(current => mergeHistory(current, localHistory))
         } catch {
           setMonitorError('趋势数据保存失败')
         }
@@ -297,25 +370,36 @@ export function PowerQueryScreen() {
         await syncHourlyMonitor(false).catch(() => undefined)
       }
       const same = sameRoom(current.myRoom, target)
-      updatePreferences({
+      const nextPreferences = updatePreferences({
         myRoom: target,
         monitoringEnabled: same ? current.monitoringEnabled : false,
         notificationsEnabled: same ? current.notificationsEnabled : false
       })
-      setHistory(await appendHistory(target, result.kwh, result.updatedAt))
+      const localHistory = await appendHistory(target, result.kwh, result.updatedAt)
+      setHistory(localHistory)
+      try {
+        const pushToken = nextPreferences.notificationsEnabled ? await getRemotePushToken() : undefined
+        const serverHistory = await syncServerWatch(target, nextPreferences, pushToken || undefined)
+        if (mountedRef.current) setHistory(currentHistory => mergeHistory(currentHistory, serverHistory))
+      } catch {
+        if (mountedRef.current) setMonitorError('服务器监控登记失败，将在下次打开应用时重试')
+      }
     } catch (error) {
       if (mountedRef.current) setMonitorError(errorMessage(error, '我的寝室保存失败'))
     } finally {
       if (mountedRef.current) setMonitorBusy(false)
     }
-  }, [result, updatePreferences])
+  }, [result, syncServerWatch, updatePreferences])
 
   const handleRemoveMine = useCallback(async () => {
     if (!preferencesRef.current.myRoom) return
     setMonitorBusy(true)
     setMonitorError(null)
     try {
-      await syncHourlyMonitor(false)
+      await syncHourlyMonitor(false).catch(() => undefined)
+      const token = mobileTokenRef.current || await getMobileInstallationToken()
+      mobileTokenRef.current = token
+      await removeMobileWatch(token)
       await clearHistory()
       updatePreferences({
         myRoom: null,
@@ -331,8 +415,21 @@ export function PowerQueryScreen() {
   }, [updatePreferences])
 
   const handleThresholdChange = useCallback((value: number) => {
-    updatePreferences({ threshold: normalizeThreshold(value, preferencesRef.current.threshold) })
-  }, [updatePreferences])
+    const nextPreferences = updatePreferences({
+      threshold: normalizeThreshold(value, preferencesRef.current.threshold)
+    })
+    if (!nextPreferences.myRoom) return
+    const roomToUpdate = nextPreferences.myRoom
+
+    void (async () => {
+      try {
+        const pushToken = nextPreferences.notificationsEnabled ? await getRemotePushToken() : undefined
+        await syncServerWatch(roomToUpdate, nextPreferences, pushToken || undefined)
+      } catch {
+        if (mountedRef.current) setMonitorError('提醒阈值同步失败，将在下次打开应用时重试')
+      }
+    })()
+  }, [syncServerWatch, updatePreferences])
 
   const handleToggleMonitoring = useCallback(async () => {
     const roomToMonitor = preferencesRef.current.myRoom
@@ -343,18 +440,31 @@ export function PowerQueryScreen() {
     setMonitorError(null)
     try {
       if (wasEnabled) {
-        await syncHourlyMonitor(false)
-        updatePreferences({ monitoringEnabled: false })
+        const nextPreferences = {
+          ...preferencesRef.current,
+          monitoringEnabled: false,
+          notificationsEnabled: false
+        }
+        await syncServerWatch(roomToMonitor, nextPreferences)
+        await syncHourlyMonitor(false).catch(() => undefined)
+        updatePreferences({ monitoringEnabled: false, notificationsEnabled: false })
       } else {
         const granted = await requestNotificationAccess()
         if (!granted) throw new Error('请允许通知权限后再开启提醒')
 
+        const nextPreferences = {
+          ...preferencesRef.current,
+          monitoringEnabled: true,
+          notificationsEnabled: true
+        }
+        const pushToken = await getRemotePushToken()
+        const serverHistory = await syncServerWatch(roomToMonitor, nextPreferences, pushToken || undefined)
         updatePreferences({ monitoringEnabled: true, notificationsEnabled: true })
         await persistenceQueue.current
         await syncHourlyMonitor(true)
-        const nextHistory = await runMonitorNow()
+        const localHistory = await runMonitorNow()
         if (mountedRef.current && sameRoom(preferencesRef.current.myRoom, roomToMonitor)) {
-          setHistory(nextHistory)
+          setHistory(current => mergeHistory(current, serverHistory, localHistory))
         }
       }
     } catch (error) {
@@ -366,7 +476,7 @@ export function PowerQueryScreen() {
     } finally {
       if (mountedRef.current) setMonitorBusy(false)
     }
-  }, [updatePreferences])
+  }, [syncServerWatch, updatePreferences])
 
   const showBuildingEmpty = !hydrating && !currentBuildingsLoading && !currentBuildingsError && currentBuildings.length === 0
 

@@ -24,6 +24,36 @@ export interface PowerResult extends QueryPayload {
   cached?: boolean
 }
 
+export interface MobileWatch {
+  campus: Campus
+  building: string
+  room: string
+  threshold: number
+  notificationsEnabled: boolean
+  updatedAt: string
+  displayName: string
+}
+
+export interface MobileHistoryPoint {
+  id: number
+  kwh: number
+  createdAt: string
+  recharged: boolean
+}
+
+export interface MobileHistoryResponse {
+  watch: MobileWatch
+  displayName: string
+  stats: {
+    current: number | null
+    consumed24h: number | null
+    dailyAverage: number | null
+    estimatedDays: number | null
+    rechargeCount: number
+  }
+  items: MobileHistoryPoint[]
+}
+
 export interface ApiErrorBody {
   error?: string
 }

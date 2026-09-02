@@ -11,19 +11,16 @@ async function migrate(db) {
     PRAGMA busy_timeout=5000;
     PRAGMA synchronous=NORMAL;
     PRAGMA foreign_keys=ON;
-    CREATE TABLE IF NOT EXISTS sessions (
-      token TEXT PRIMARY KEY,
-      openid TEXT NOT NULL,
-      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-    );
-    CREATE TABLE IF NOT EXISTS watches (
-      openid TEXT PRIMARY KEY,
+    CREATE TABLE IF NOT EXISTS mobile_watches (
+      token_hash TEXT PRIMARY KEY,
       campus TEXT NOT NULL,
       building TEXT NOT NULL,
       room TEXT NOT NULL,
       threshold REAL NOT NULL DEFAULT 15,
-      credits INTEGER NOT NULL DEFAULT 0,
+      notifications_enabled INTEGER NOT NULL DEFAULT 0,
       alerted INTEGER NOT NULL DEFAULT 0,
+      push_token TEXT,
+      push_provider TEXT,
       updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
     );
     CREATE TABLE IF NOT EXISTS snapshots (
@@ -35,16 +32,9 @@ async function migrate(db) {
       kwh REAL NOT NULL,
       created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
     );
-    CREATE INDEX IF NOT EXISTS idx_sessions_openid ON sessions(openid);
+    CREATE INDEX IF NOT EXISTS idx_mobile_watches_room ON mobile_watches(campus, building, room);
     CREATE INDEX IF NOT EXISTS idx_snapshots_room_time ON snapshots(room_key, created_at DESC);
   `)
-
-  const columns = await db.all('PRAGMA table_info(sessions)')
-  if (!columns.some(column => column.name === 'expires_at')) {
-    await db.exec('ALTER TABLE sessions ADD COLUMN expires_at INTEGER')
-    await db.run('UPDATE sessions SET expires_at=? WHERE expires_at IS NULL', Date.now() - 1)
-  }
-  await db.exec('CREATE INDEX IF NOT EXISTS idx_sessions_expiry ON sessions(expires_at)')
 }
 
 export async function getDb() {

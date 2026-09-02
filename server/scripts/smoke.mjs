@@ -12,9 +12,7 @@ const child = spawn(process.execPath, ['src/index.js'], {
     ...process.env,
     NODE_ENV: 'test',
     PORT: String(port),
-    DB_PATH: path.join(tempDir, 'power.sqlite'),
-    WECHAT_APPID: '',
-    WECHAT_SECRET: ''
+    DB_PATH: path.join(tempDir, 'power.sqlite')
   },
   stdio: ['ignore', 'pipe', 'pipe']
 })

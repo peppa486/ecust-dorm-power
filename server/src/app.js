@@ -1,15 +1,14 @@
 import express from 'express'
 import helmet from 'helmet'
 import { buildingOptions } from './buildings.js'
-import { loginWithCode, requireUser } from './auth.js'
+import { requireMobile } from './mobile-auth.js'
 import { createRateLimit } from './rate-limit.js'
 import {
-  addSubscriptionCredit,
-  getHistory,
-  getWatch,
+  getMobileHistory,
+  getMobileWatch,
   queryPower,
-  removeWatch,
-  saveWatch
+  removeMobileWatch,
+  saveMobileWatch
 } from './service.js'
 
 export function createApp() {
@@ -26,10 +25,6 @@ export function createApp() {
   app.use('/api', createRateLimit({ max: Number(process.env.RATE_LIMIT_PER_MINUTE || 60) }))
 
   app.get('/health', (_req, res) => res.json({ ok: true }))
-
-  app.get('/api/client-config', (_req, res) => {
-    res.json({ lowPowerTemplateId: process.env.WECHAT_LOW_POWER_TEMPLATE_ID || '' })
-  })
 
   app.get('/api/buildings', (req, res, next) => {
     try {
@@ -50,55 +45,46 @@ export function createApp() {
     }
   })
 
-  app.post('/api/auth/login', createRateLimit({ max: Number(process.env.RATE_LIMIT_LOGIN_PER_MINUTE || 10) }), async (req, res, next) => {
+  app.get('/api/mobile/watch', requireMobile, async (req, res, next) => {
     try {
-      res.json(await loginWithCode(req.body?.code))
+      res.json({ watch: await getMobileWatch(req.mobileTokenHash) })
     } catch (error) {
       next(error)
     }
   })
 
-  app.get('/api/watch', requireUser, async (req, res, next) => {
-    try {
-      res.json({ watch: await getWatch(req.openid) })
-    } catch (error) {
-      next(error)
-    }
-  })
-
-  app.post('/api/watch', requireUser, async (req, res, next) => {
+  app.post('/api/mobile/watch', createRateLimit({ max: 30 }), requireMobile, async (req, res, next) => {
     try {
       const campus = String(req.body?.campus || '')
       const building = String(req.body?.building || '')
       const room = String(req.body?.room || '')
-      res.json({ watch: await saveWatch(req.openid, campus, building, room, req.body?.threshold) })
+      const watch = await saveMobileWatch(
+        req.mobileTokenHash,
+        campus,
+        building,
+        room,
+        req.body?.threshold,
+        req.body?.notificationsEnabled,
+        req.body?.pushToken
+      )
+      res.json({ watch })
     } catch (error) {
       next(error)
     }
   })
 
-  app.delete('/api/watch', requireUser, async (req, res, next) => {
+  app.delete('/api/mobile/watch', createRateLimit({ max: 30 }), requireMobile, async (req, res, next) => {
     try {
-      await removeWatch(req.openid)
+      await removeMobileWatch(req.mobileTokenHash)
       res.json({ ok: true })
     } catch (error) {
       next(error)
     }
   })
 
-  app.post('/api/watch/subscription', requireUser, async (req, res, next) => {
+  app.get('/api/mobile/history', requireMobile, async (req, res, next) => {
     try {
-      const expected = process.env.WECHAT_LOW_POWER_TEMPLATE_ID || ''
-      if (!expected || req.body?.templateId !== expected) throw new Error('订阅模板不匹配')
-      res.json({ watch: await addSubscriptionCredit(req.openid, req.body?.threshold) })
-    } catch (error) {
-      next(error)
-    }
-  })
-
-  app.get('/api/history', requireUser, async (req, res, next) => {
-    try {
-      res.json(await getHistory(req.openid))
+      res.json(await getMobileHistory(req.mobileTokenHash))
     } catch (error) {
       next(error)
     }

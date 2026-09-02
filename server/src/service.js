@@ -2,8 +2,8 @@ import { computeHistoryStats } from './analytics.js'
 import { buildingLabel, roomKey, validateRoom } from './buildings.js'
 import { TtlCache } from './cache.js'
 import { getDb } from './db.js'
+import { MobilePushError, sendMobileNotification } from './mobile-push.js'
 import { fetchPower } from './power.js'
-import { sendLowPower, WeChatSendError } from './wechat.js'
 
 const cache = new TtlCache(Number(process.env.CACHE_SECONDS || 600) * 1000)
 const inFlightQueries = new Map()
@@ -14,6 +14,57 @@ function normalizeThreshold(value) {
   const number = value === undefined || value === null || value === '' ? 15 : Number(value)
   if (!Number.isFinite(number)) throw new Error('提醒阈值格式不正确')
   return Math.max(5, Math.min(40, number))
+}
+
+function assertMobileTokenHash(tokenHash) {
+  if (typeof tokenHash !== 'string' || !/^[a-f0-9]{64}$/.test(tokenHash)) {
+    const error = new Error('移动设备未登记')
+    error.statusCode = 401
+    error.expose = true
+    throw error
+  }
+  return tokenHash
+}
+
+function normalizePushToken(value) {
+  if (value === undefined) return undefined
+  if (value === null || value === '') return null
+  if (typeof value !== 'string' || value.length > 512 || !/^(?:Expo|Exponent)PushToken\[[^\]]+\]$/.test(value)) {
+    throw new Error('推送令牌格式不正确')
+  }
+  return value
+}
+
+function missingMobileWatch() {
+  const error = new Error('移动设备尚未设置我的寝室')
+  error.statusCode = 401
+  error.expose = true
+  return error
+}
+
+function toMobileWatch(watch) {
+  if (!watch) return null
+  return {
+    campus: watch.campus,
+    building: watch.building,
+    room: watch.room,
+    threshold: Number(watch.threshold),
+    notificationsEnabled: Boolean(watch.notifications_enabled),
+    updatedAt: watch.updated_at,
+    displayName: `${watch.campus} · ${buildingLabel(watch.campus, watch.building)} · ${watch.room}`
+  }
+}
+
+async function countRoomWatchers(db, campus, building, room) {
+  return db.get(
+    'SELECT COUNT(*) AS count FROM mobile_watches WHERE campus=? AND building=? AND room=?',
+    campus, building, room
+  )
+}
+
+async function cleanupRoomSnapshots(db, campus, building, room) {
+  const remaining = await countRoomWatchers(db, campus, building, room)
+  if (!remaining.count) await db.run('DELETE FROM snapshots WHERE room_key=?', roomKey(campus, building, room))
 }
 
 export async function queryPower(campus, building, room, { fresh = false, provider = fetchPower } = {}) {
@@ -57,49 +108,76 @@ export function storeSnapshot(data) {
   return operation
 }
 
-export async function getWatch(openid) {
+export async function getMobileWatch(tokenHash) {
+  assertMobileTokenHash(tokenHash)
   const db = await getDb()
   const watch = await db.get(
-    'SELECT campus,building,room,threshold,credits,alerted,updated_at FROM watches WHERE openid=?',
-    openid
+    `SELECT campus,building,room,threshold,notifications_enabled,updated_at
+     FROM mobile_watches WHERE token_hash=?`,
+    tokenHash
   )
-  if (!watch) return null
-  return {
-    ...watch,
-    displayName: `${watch.campus} · ${buildingLabel(watch.campus, watch.building)} · ${watch.room}`
-  }
+  return toMobileWatch(watch)
 }
 
-export async function saveWatch(openid, campus, building, room, threshold, { provider = fetchPower } = {}) {
-  return saveWatchWithProvider(openid, campus, building, room, threshold, provider)
-}
-
-async function saveWatchWithProvider(openid, campus, building, room, threshold, provider = fetchPower) {
+export async function saveMobileWatch(
+  tokenHash,
+  campus,
+  building,
+  room,
+  threshold,
+  notificationsEnabled = false,
+  pushToken,
+  { provider = fetchPower } = {}
+) {
+  assertMobileTokenHash(tokenHash)
   const normalizedRoom = validateRoom(campus, building, room)
   const safeThreshold = normalizeThreshold(threshold)
+  const safeNotifications = Boolean(notificationsEnabled)
+  const safePushToken = normalizePushToken(pushToken)
   const db = await getDb()
-  const existing = await db.get('SELECT campus,building,room,threshold,alerted FROM watches WHERE openid=?', openid)
-  const changedRoom = !existing || existing.campus !== campus || existing.building !== building || existing.room !== normalizedRoom
-  const resetAlerted = changedRoom || Number(existing?.threshold) !== safeThreshold
+  const existing = await db.get(
+    `SELECT campus,building,room,threshold,notifications_enabled,alerted,push_token
+     FROM mobile_watches WHERE token_hash=?`,
+    tokenHash
+  )
+  const changedRoom = !existing
+    || existing.campus !== campus
+    || existing.building !== building
+    || existing.room !== normalizedRoom
+  const changedThreshold = Number(existing?.threshold) !== safeThreshold
+  const changedNotifications = Boolean(existing?.notifications_enabled) !== safeNotifications
+  const resetAlerted = changedRoom || changedThreshold || changedNotifications
+  const nextPushToken = safePushToken === undefined ? existing?.push_token || null : safePushToken
+  const nextPushProvider = nextPushToken ? 'expo' : null
+
   await db.run(
-    `INSERT INTO watches(openid,campus,building,room,threshold,credits,alerted,updated_at)
-     VALUES(?,?,?,?,?,0,0,CURRENT_TIMESTAMP)
-     ON CONFLICT(openid) DO UPDATE SET
+    `INSERT INTO mobile_watches(
+       token_hash,campus,building,room,threshold,notifications_enabled,alerted,push_token,push_provider,updated_at
+     ) VALUES(?,?,?,?,?,?,?,?,?,CURRENT_TIMESTAMP)
+     ON CONFLICT(token_hash) DO UPDATE SET
        campus=excluded.campus,
        building=excluded.building,
        room=excluded.room,
        threshold=excluded.threshold,
-       alerted=CASE WHEN ? THEN 0 ELSE watches.alerted END,
+       notifications_enabled=excluded.notifications_enabled,
+       alerted=CASE WHEN ? THEN 0 ELSE mobile_watches.alerted END,
+       push_token=excluded.push_token,
+       push_provider=excluded.push_provider,
        updated_at=CURRENT_TIMESTAMP`,
-    openid, campus, building, normalizedRoom, safeThreshold, resetAlerted ? 1 : 0
+    tokenHash,
+    campus,
+    building,
+    normalizedRoom,
+    safeThreshold,
+    safeNotifications ? 1 : 0,
+    0,
+    nextPushToken,
+    nextPushProvider,
+    resetAlerted ? 1 : 0
   )
+
   if (changedRoom && existing) {
-    const oldKey = roomKey(existing.campus, existing.building, existing.room)
-    const remaining = await db.get(
-      'SELECT COUNT(*) AS count FROM watches WHERE campus=? AND building=? AND room=?',
-      existing.campus, existing.building, existing.room
-    )
-    if (!remaining.count) await db.run('DELETE FROM snapshots WHERE room_key=?', oldKey)
+    await cleanupRoomSnapshots(db, existing.campus, existing.building, existing.room)
   }
 
   if (changedRoom) {
@@ -107,22 +185,56 @@ async function saveWatchWithProvider(openid, campus, building, room, threshold, 
       const data = await queryPower(campus, building, normalizedRoom, { provider })
       await storeSnapshot(data)
     } catch (error) {
-      console.warn(`snapshot ${campus}/${building}/${normalizedRoom}: ${error.message}`)
+      console.warn(`mobile snapshot ${campus}/${building}/${normalizedRoom}: ${error.message}`)
     }
   }
-  return getWatch(openid)
+  return getMobileWatch(tokenHash)
 }
 
-export async function removeWatch(openid) {
+export async function removeMobileWatch(tokenHash) {
+  assertMobileTokenHash(tokenHash)
   const db = await getDb()
-  const watch = await db.get('SELECT campus,building,room FROM watches WHERE openid=?', openid)
-  await db.run('DELETE FROM watches WHERE openid=?', openid)
-  if (!watch) return
-  const remaining = await db.get(
-    'SELECT COUNT(*) AS count FROM watches WHERE campus=? AND building=? AND room=?',
-    watch.campus, watch.building, watch.room
+  const watch = await db.get(
+    'SELECT campus,building,room FROM mobile_watches WHERE token_hash=?',
+    tokenHash
   )
-  if (!remaining.count) await db.run('DELETE FROM snapshots WHERE room_key=?', roomKey(watch.campus, watch.building, watch.room))
+  await db.run('DELETE FROM mobile_watches WHERE token_hash=?', tokenHash)
+  if (watch) await cleanupRoomSnapshots(db, watch.campus, watch.building, watch.room)
+}
+
+function mapHistoryItems(items) {
+  let previous = null
+  return items.map(item => {
+    const current = { id: item.id, kwh: Number(item.kwh), createdAt: item.created_at }
+    const mapped = {
+      ...current,
+      recharged: Boolean(previous && current.kwh - previous.kwh > 2)
+    }
+    previous = current
+    return mapped
+  })
+}
+
+export async function getMobileHistory(tokenHash) {
+  assertMobileTokenHash(tokenHash)
+  const db = await getDb()
+  const watch = await getMobileWatch(tokenHash)
+  if (!watch) throw missingMobileWatch()
+  const key = roomKey(watch.campus, watch.building, watch.room)
+  const items = await db.all(
+    `SELECT id,kwh,created_at FROM snapshots
+     WHERE room_key=? AND datetime(created_at)>=datetime(?)
+     ORDER BY created_at ASC, id ASC LIMIT 1008`,
+    key,
+    new Date(Date.now() - 14 * 24 * 60 * 60 * 1000).toISOString()
+  )
+  const mappedItems = mapHistoryItems(items)
+  return {
+    watch,
+    displayName: watch.displayName,
+    stats: computeHistoryStats(items),
+    items: mappedItems
+  }
 }
 
 export async function cleanupSnapshots(days = 14) {
@@ -131,40 +243,18 @@ export async function cleanupSnapshots(days = 14) {
   await db.run('DELETE FROM snapshots WHERE datetime(created_at)<datetime(?)', cutoff)
 }
 
-export async function addSubscriptionCredit(openid, threshold) {
+export async function cleanupMobileWatches(days = 30) {
   const db = await getDb()
-  const watch = await db.get('SELECT openid,threshold FROM watches WHERE openid=?', openid)
-  if (!watch) throw new Error('请先设为我的寝室')
-  const safeThreshold = normalizeThreshold(threshold)
-  const resetAlerted = Number(watch.threshold) !== safeThreshold
-  await db.run(
-    'UPDATE watches SET threshold=?,credits=MIN(credits+1,5),alerted=CASE WHEN ? THEN 0 ELSE alerted END,updated_at=CURRENT_TIMESTAMP WHERE openid=?',
-    safeThreshold,
-    resetAlerted ? 1 : 0,
-    openid
+  const cutoff = new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString()
+  const stale = await db.all(
+    'SELECT campus,building,room FROM mobile_watches WHERE datetime(updated_at)<datetime(?)',
+    cutoff
   )
-  return getWatch(openid)
-}
-
-export async function getHistory(openid) {
-  const db = await getDb()
-  const watch = await getWatch(openid)
-  if (!watch) throw new Error('还没有设置我的寝室')
-  const key = roomKey(watch.campus, watch.building, watch.room)
-  const items = await db.all(
-    `SELECT id,kwh,created_at FROM snapshots
-     WHERE room_key=? AND datetime(created_at)>=datetime(?)
-     ORDER BY created_at DESC, id DESC LIMIT 1008`,
-    key,
-    new Date(Date.now() - 14 * 24 * 60 * 60 * 1000).toISOString()
-  )
-  items.reverse()
-  return {
-    watch,
-    displayName: watch.displayName,
-    stats: computeHistoryStats(items),
-    items: items.map(item => ({ id: item.id, kwh: item.kwh, createdAt: item.created_at }))
+  await db.run('DELETE FROM mobile_watches WHERE datetime(updated_at)<datetime(?)', cutoff)
+  for (const watch of stale) {
+    await cleanupRoomSnapshots(db, watch.campus, watch.building, watch.room)
   }
+  return stale.length
 }
 
 async function mapLimit(items, limit, worker) {
@@ -178,9 +268,12 @@ async function mapLimit(items, limit, worker) {
   await Promise.all(jobs)
 }
 
-async function pollWatchesOnce({ powerProvider = fetchPower, sendNotification = sendLowPower } = {}) {
+async function pollWatchesOnce({
+  powerProvider = fetchPower,
+  mobileSendNotification = sendMobileNotification
+} = {}) {
   const db = await getDb()
-  const rooms = await db.all('SELECT DISTINCT campus,building,room FROM watches')
+  const rooms = await db.all('SELECT DISTINCT campus,building,room FROM mobile_watches')
   const configuredConcurrency = Number(process.env.POLL_CONCURRENCY || 3)
   const concurrency = Math.max(1, Math.min(8, Number.isFinite(configuredConcurrency) ? Math.floor(configuredConcurrency) : 3))
 
@@ -188,29 +281,41 @@ async function pollWatchesOnce({ powerProvider = fetchPower, sendNotification = 
     try {
       const data = await queryPower(room.campus, room.building, room.room, { fresh: true, provider: powerProvider })
       await storeSnapshot(data)
-      const users = await db.all(
-        'SELECT openid,campus,building,room,threshold,credits,alerted FROM watches WHERE campus=? AND building=? AND room=?',
+
+      const mobileUsers = await db.all(
+        `SELECT token_hash,campus,building,room,threshold,notifications_enabled,alerted,push_token
+         FROM mobile_watches WHERE campus=? AND building=? AND room=?`,
         room.campus, room.building, room.room
       )
-
-      for (const watch of users) {
+      for (const watch of mobileUsers) {
         if (watch.alerted && data.kwh > watch.threshold + 2) {
-          await db.run('UPDATE watches SET alerted=0 WHERE openid=?', watch.openid)
+          await db.run('UPDATE mobile_watches SET alerted=0 WHERE token_hash=?', watch.token_hash)
           watch.alerted = 0
         }
-        if (data.kwh > watch.threshold || watch.alerted || watch.credits <= 0) continue
+        if (!watch.notifications_enabled || data.kwh > watch.threshold || watch.alerted || !watch.push_token) continue
 
         try {
-          await sendNotification(watch.openid, watch, data.kwh)
+          await mobileSendNotification(
+            watch.push_token,
+            {
+              ...watch,
+              threshold: Number(watch.threshold),
+              displayName: `${watch.campus} · ${buildingLabel(watch.campus, watch.building)} · ${watch.room}`
+            },
+            data.kwh
+          )
           await db.run(
-            'UPDATE watches SET alerted=1,credits=MAX(credits-1,0) WHERE openid=? AND credits>0 AND alerted=0',
-            watch.openid
+            'UPDATE mobile_watches SET alerted=1 WHERE token_hash=? AND notifications_enabled=1 AND alerted=0',
+            watch.token_hash
           )
         } catch (error) {
-          if (error instanceof WeChatSendError && error.code === 43101) {
-            await db.run('UPDATE watches SET credits=0 WHERE openid=?', watch.openid)
+          if (error instanceof MobilePushError && ['InvalidPushToken', 'DeviceNotRegistered'].includes(error.code)) {
+            await db.run(
+              'UPDATE mobile_watches SET push_token=NULL,push_provider=NULL WHERE token_hash=?',
+              watch.token_hash
+            )
           } else {
-            console.error(`notify ${watch.openid.slice(0, 6)}: ${error.message}`)
+            console.error(`mobile notify ${watch.token_hash.slice(0, 8)}: ${error.message}`)
           }
         }
       }

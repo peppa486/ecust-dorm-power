@@ -4,6 +4,4 @@
 server/.env
 server/data/
 server/node_modules/
-miniprogram_npm/
-project.private.config.json
 *.log
