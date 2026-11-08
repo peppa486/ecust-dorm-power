@@ -36,8 +36,8 @@ const styles = StyleSheet.create({
     backgroundColor: colors.surface
   },
   errorCard: {
-    backgroundColor: '#fffafa',
-    borderColor: '#f4d8d5'
+    backgroundColor: colors.errorSurface,
+    borderColor: colors.errorBorder
   },
   title: {
     color: colors.textSecondary,

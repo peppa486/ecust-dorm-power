@@ -144,9 +144,7 @@ export function HeroTelemetryCard({
       {/* 绑定操作 */}
       {(isMine && onRemoveMine) || (!isMine && onSetMine && result) ? (
         <View style={styles.footerRow}>
-          <Text style={styles.roomMetaText}>
-            {isMine ? '已绑定为常住寝室' : '设为常住寝室以记录整点趋势'}
-          </Text>
+          <View style={{ flex: 1 }} />
           {isMine && onRemoveMine ? (
             <Pressable
               onPress={onRemoveMine}
@@ -207,7 +205,7 @@ const styles = StyleSheet.create({
     borderRadius: 5,
     backgroundColor: colors.control,
     color: colors.textMuted,
-    fontSize: 10,
+    fontSize: 11,
     fontWeight: '600'
   },
   eyebrowRight: {
@@ -316,7 +314,7 @@ const styles = StyleSheet.create({
     top: 0,
     bottom: 0,
     width: 2,
-    backgroundColor: 'rgba(28, 28, 30, 0.35)'
+    backgroundColor: colors.thresholdMarker
   },
   kpiGrid: {
     flexDirection: 'row',

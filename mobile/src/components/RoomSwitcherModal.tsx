@@ -1,5 +1,6 @@
-import { Modal, Pressable, StyleSheet, Text, View } from 'react-native'
+import { Pressable, StyleSheet, Text, View } from 'react-native'
 
+import { BottomSheet } from './BottomSheet'
 import { QueryCard } from './QueryCard'
 import { colors, hairlineWidth, radii, spacing } from '../theme'
 import type { BuildingOption, Campus } from '../types/api'
@@ -38,73 +39,42 @@ export function RoomSwitcherModal({
   onQuery
 }: RoomSwitcherModalProps) {
   return (
-    <Modal
-      visible={visible}
-      transparent
-      animationType="slide"
-      onRequestClose={onClose}
-    >
-      <View style={styles.backdrop}>
-        <Pressable style={styles.backdropDismiss} onPress={onClose} />
-        <View style={styles.sheet}>
-          <View style={styles.grabber} />
-          <View style={styles.header}>
-            <Text style={styles.title}>切换或查询寝室</Text>
-            <Pressable
-              onPress={onClose}
-              hitSlop={10}
-              style={({ pressed }) => [styles.closeBtn, pressed && styles.pressed]}
-              accessibilityRole="button"
-              accessibilityLabel="关闭寝室查询抽屉"
-            >
-              <Text style={styles.closeText}>完成</Text>
-            </Pressable>
-          </View>
-
-          <QueryCard
-            campus={campus}
-            building={building}
-            room={room}
-            buildingsLoading={buildingsLoading}
-            buildingsError={buildingsError}
-            queryLoading={queryLoading}
-            disabled={disabled}
-            onCampusChange={onCampusChange}
-            onOpenBuildingPicker={onOpenBuildingPicker}
-            onRetryBuildings={onRetryBuildings}
-            onRoomChange={onRoomChange}
-            onQuery={onQuery}
-          />
-        </View>
+    <BottomSheet visible={visible} onClose={onClose} coverStatusBar={false} sheetStyle={styles.sheet}>
+      <View style={styles.header}>
+        <Text style={styles.title}>切换或查询寝室</Text>
+        <Pressable
+          onPress={onClose}
+          hitSlop={10}
+          style={({ pressed }) => [styles.closeBtn, pressed && styles.pressed]}
+          accessibilityRole="button"
+          accessibilityLabel="关闭寝室查询抽屉"
+        >
+          <Text style={styles.closeText}>完成</Text>
+        </Pressable>
       </View>
-    </Modal>
+
+      <QueryCard
+        campus={campus}
+        building={building}
+        room={room}
+        buildingsLoading={buildingsLoading}
+        buildingsError={buildingsError}
+        queryLoading={queryLoading}
+        disabled={disabled}
+        onCampusChange={onCampusChange}
+        onOpenBuildingPicker={onOpenBuildingPicker}
+        onRetryBuildings={onRetryBuildings}
+        onRoomChange={onRoomChange}
+        onQuery={onQuery}
+      />
+    </BottomSheet>
   )
 }
 
 const styles = StyleSheet.create({
-  backdrop: {
-    flex: 1,
-    justifyContent: 'flex-end',
-    backgroundColor: 'rgba(0, 0, 0, 0.32)'
-  },
-  backdropDismiss: {
-    flex: 1
-  },
   sheet: {
-    paddingTop: 10,
     paddingHorizontal: spacing.xl,
-    paddingBottom: 28,
-    borderTopLeftRadius: radii.sheet,
-    borderTopRightRadius: radii.sheet,
-    backgroundColor: colors.background
-  },
-  grabber: {
-    alignSelf: 'center',
-    width: 36,
-    height: 5,
-    borderRadius: radii.pill,
-    backgroundColor: 'rgba(60, 60, 67, 0.24)',
-    marginBottom: spacing.md
+    paddingBottom: 28
   },
   header: {
     flexDirection: 'row',

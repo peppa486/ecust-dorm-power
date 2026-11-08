@@ -1,6 +1,8 @@
-import { Pressable, StyleSheet, Text, View } from 'react-native'
+import { useEffect, useRef } from 'react'
+import { Animated, Pressable, StyleSheet, Text, View } from 'react-native'
 
 import { cardShadow, colors, hairlineWidth, radii, spacing } from '../theme'
+import { useReducedMotion } from '../utils/useReducedMotion'
 
 interface MonitorCardProps {
   threshold: number
@@ -19,6 +21,8 @@ interface MonitorCardProps {
   onOpenBatterySettings: () => void
 }
 
+const SWITCH_TRAVEL = 20
+
 function IosSwitch({
   value,
   disabled,
@@ -30,25 +34,42 @@ function IosSwitch({
   onPress: () => void
   label: string
 }) {
+  const progress = useRef(new Animated.Value(value ? 1 : 0)).current
+
+  const reduceMotion = useReducedMotion()
+
+  useEffect(() => {
+    if (reduceMotion) {
+      progress.setValue(value ? 1 : 0)
+      return
+    }
+    // 临界阻尼弹簧：可被打断，从当前位置继续
+    Animated.spring(progress, {
+      toValue: value ? 1 : 0,
+      damping: 22,
+      stiffness: 360,
+      mass: 1,
+      useNativeDriver: true
+    }).start()
+  }, [progress, reduceMotion, value])
+
+  const translateX = progress.interpolate({ inputRange: [0, 1], outputRange: [0, SWITCH_TRAVEL] })
+
   return (
     <Pressable
       onPress={onPress}
       disabled={disabled}
-      style={[
-        styles.switchTrack,
-        value ? styles.switchTrackOn : styles.switchTrackOff,
-        disabled && styles.disabled
-      ]}
+      hitSlop={6}
+      style={[styles.switchTrack, styles.switchTrackOff, disabled && styles.disabled]}
       accessibilityRole="switch"
       accessibilityState={{ checked: value, disabled }}
       accessibilityLabel={label}
     >
-      <View
-        style={[
-          styles.switchThumb,
-          value ? styles.switchThumbOn : styles.switchThumbOff
-        ]}
+      <Animated.View
+        pointerEvents="none"
+        style={[styles.switchFill, { opacity: progress }]}
       />
+      <Animated.View style={[styles.switchThumb, { transform: [{ translateX }] }]} />
     </Pressable>
   )
 }
@@ -250,28 +271,28 @@ const styles = StyleSheet.create({
     padding: 2,
     justifyContent: 'center'
   },
-  switchTrackOn: {
+  switchFill: {
+    position: 'absolute',
+    top: 0,
+    right: 0,
+    bottom: 0,
+    left: 0,
+    borderRadius: radii.pill,
     backgroundColor: colors.iosGreen
   },
   switchTrackOff: {
-    backgroundColor: 'rgba(120, 120, 128, 0.24)'
+    backgroundColor: colors.switchOff
   },
   switchThumb: {
     width: 24,
     height: 24,
     borderRadius: radii.pill,
-    backgroundColor: colors.surface,
+    backgroundColor: '#FFFFFF',
     shadowColor: '#000',
     shadowOpacity: 0.15,
     shadowRadius: 2.5,
     shadowOffset: { width: 0, height: 1 },
     elevation: 2
-  },
-  switchThumbOn: {
-    alignSelf: 'flex-end'
-  },
-  switchThumbOff: {
-    alignSelf: 'flex-start'
   },
   stepper: {
     flexDirection: 'row',

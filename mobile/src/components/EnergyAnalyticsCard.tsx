@@ -11,6 +11,7 @@ import {
 
 import type { HistoryPoint } from '../storage/history'
 import { cardShadow, colors, hairlineWidth, radii, spacing } from '../theme'
+import { SegmentedControl, type SegmentOption } from './SegmentedControl'
 import type {
   DailyConsumptionPoint,
   ForecastPoint,
@@ -20,6 +21,12 @@ import { hapticLight, hapticTick } from '../utils/haptics'
 import { formatNumberCompact, formatUpdatedAt } from '../utils/power'
 
 type ChartTab = 'hourly' | 'daily' | 'balance'
+
+const TAB_OPTIONS: readonly SegmentOption<ChartTab>[] = [
+  { key: 'hourly', label: '按小时' },
+  { key: 'daily', label: '按日' },
+  { key: 'balance', label: '余量趋势' }
+]
 
 interface EnergyAnalyticsCardProps {
   points: HistoryPoint[]
@@ -326,39 +333,12 @@ export function EnergyAnalyticsCard({
 
   return (
     <View style={styles.card}>
-      {/* iOS Segmented Control */}
-      <View style={styles.segmented} accessibilityRole="tablist">
-        <Pressable
-          onPress={() => handleSwitchTab('hourly')}
-          style={[styles.segButton, activeTab === 'hourly' && styles.segButtonActive]}
-          accessibilityRole="tab"
-          accessibilityState={{ selected: activeTab === 'hourly' }}
-        >
-          <Text style={[styles.segText, activeTab === 'hourly' && styles.segTextActive]}>
-            按小时
-          </Text>
-        </Pressable>
-        <Pressable
-          onPress={() => handleSwitchTab('daily')}
-          style={[styles.segButton, activeTab === 'daily' && styles.segButtonActive]}
-          accessibilityRole="tab"
-          accessibilityState={{ selected: activeTab === 'daily' }}
-        >
-          <Text style={[styles.segText, activeTab === 'daily' && styles.segTextActive]}>
-            按日
-          </Text>
-        </Pressable>
-        <Pressable
-          onPress={() => handleSwitchTab('balance')}
-          style={[styles.segButton, activeTab === 'balance' && styles.segButtonActive]}
-          accessibilityRole="tab"
-          accessibilityState={{ selected: activeTab === 'balance' }}
-        >
-          <Text style={[styles.segText, activeTab === 'balance' && styles.segTextActive]}>
-            余量趋势
-          </Text>
-        </Pressable>
-      </View>
+      <SegmentedControl
+        options={TAB_OPTIONS}
+        value={activeTab}
+        onChange={handleSwitchTab}
+        style={styles.segmented}
+      />
 
       {/* ==================== 视图 1：24 小时分时用电柱状图 ==================== */}
       {activeTab === 'hourly' && currentDay ? (
@@ -477,7 +457,7 @@ export function EnergyAnalyticsCard({
                                 ? colors.iosAmber
                                 : bucket.kwh > 0
                                   ? colors.iosBlue
-                                  : 'rgba(118, 118, 128, 0.14)',
+                                  : colors.barIdle,
                             opacity: selectedHour !== null && !isSelected ? 0.42 : 1
                           }
                         ]}
@@ -583,7 +563,7 @@ export function EnergyAnalyticsCard({
                                   ? colors.iosAmber
                                   : bar.isToday
                                     ? colors.iosGreen
-                                    : 'rgba(52, 199, 89, 0.45)',
+                                    : colors.barRecent,
                               opacity: selectedDailyIndex !== null && !isSelected ? 0.45 : 1
                             }
                           ]}
@@ -723,35 +703,7 @@ const styles = StyleSheet.create({
     ...cardShadow
   },
   segmented: {
-    flexDirection: 'row',
-    padding: 2,
-    borderRadius: 10,
-    backgroundColor: colors.segmentedTrack,
     marginBottom: spacing.lg
-  },
-  segButton: {
-    flex: 1,
-    minHeight: 32,
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderRadius: 8
-  },
-  segButtonActive: {
-    backgroundColor: colors.surface,
-    shadowColor: '#000',
-    shadowOpacity: 0.08,
-    shadowRadius: 3,
-    shadowOffset: { width: 0, height: 1 },
-    elevation: 2
-  },
-  segText: {
-    color: colors.textSecondary,
-    fontSize: 12,
-    fontWeight: '500'
-  },
-  segTextActive: {
-    color: colors.text,
-    fontWeight: '600'
   },
   calloutRow: {
     flexDirection: 'row',
@@ -858,7 +810,7 @@ const styles = StyleSheet.create({
   },
   rechargeBadgeText: {
     color: colors.iosAmberDark,
-    fontSize: 10,
+    fontSize: 11,
     fontWeight: '600'
   },
   hourlyChartWrap: {
@@ -917,7 +869,7 @@ const styles = StyleSheet.create({
   },
   xAxisTick: {
     color: colors.textFaint,
-    fontSize: 10,
+    fontSize: 11,
     fontVariant: ['tabular-nums']
   },
   rightYAxis: {
@@ -928,7 +880,7 @@ const styles = StyleSheet.create({
   },
   yAxisText: {
     color: colors.textFaint,
-    fontSize: 10,
+    fontSize: 11,
     fontVariant: ['tabular-nums']
   },
   barsRowDaily: {
@@ -959,7 +911,7 @@ const styles = StyleSheet.create({
   dailyXLabel: {
     marginTop: 5,
     color: colors.textFaint,
-    fontSize: 10,
+    fontSize: 11,
     fontVariant: ['tabular-nums']
   },
   dailyXLabelActive: {
@@ -984,7 +936,7 @@ const styles = StyleSheet.create({
     borderRadius: 4,
     backgroundColor: colors.iosAmberSurface,
     color: colors.iosAmberDark,
-    fontSize: 9,
+    fontSize: 11,
     fontWeight: '600',
     fontVariant: ['tabular-nums']
   },
@@ -1032,7 +984,7 @@ const styles = StyleSheet.create({
     borderRadius: 4,
     backgroundColor: colors.iosRedSurface,
     color: colors.iosRedDark,
-    fontSize: 9,
+    fontSize: 11,
     fontWeight: '600'
   },
   pointHitBox: {
@@ -1064,7 +1016,7 @@ const styles = StyleSheet.create({
     position: 'absolute',
     right: 8,
     color: colors.textFaint,
-    fontSize: 10,
+    fontSize: 11,
     fontVariant: ['tabular-nums']
   },
   emptyText: {

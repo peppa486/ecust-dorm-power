@@ -25,3 +25,5 @@ yarn-debug.*
 yarn-error.*
 releases/
 *.apk
+
+.verify/

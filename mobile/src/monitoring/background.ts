@@ -80,28 +80,43 @@ export async function resetMonitorAlertLock(): Promise<void> {
   })
 }
 
-export async function ensureNotificationChannels(): Promise<void> {
-  if (Platform.OS !== 'android') return
-  await Notifications.setNotificationChannelAsync(NOTIFICATION_CHANNEL, {
-    name: '低电量紧急提醒',
-    importance: Notifications.AndroidImportance.MAX,
-    vibrationPattern: [0, 280, 200, 280],
-    lightColor: '#FF3B30',
-    enableVibrate: true,
-    showBadge: true
-  })
-  await Notifications.setNotificationChannelAsync(ONGOING_NOTIFICATION_CHANNEL, {
-    name: '常驻通知栏电量卡片',
-    importance: Notifications.AndroidImportance.LOW,
-    enableVibrate: false,
-    showBadge: false
-  })
-  await Notifications.setNotificationChannelAsync(UPDATE_NOTIFICATION_CHANNEL, {
-    name: '版本更新通知',
-    importance: Notifications.AndroidImportance.DEFAULT,
-    vibrationPattern: [0, 180],
-    lightColor: '#007AFF'
-  })
+let channelsReady: Promise<void> | null = null
+
+async function createNotificationChannels(): Promise<void> {
+  await Promise.all([
+    Notifications.setNotificationChannelAsync(NOTIFICATION_CHANNEL, {
+      name: '低电量紧急提醒',
+      importance: Notifications.AndroidImportance.MAX,
+      vibrationPattern: [0, 280, 200, 280],
+      lightColor: '#FF3B30',
+      enableVibrate: true,
+      showBadge: true
+    }),
+    Notifications.setNotificationChannelAsync(ONGOING_NOTIFICATION_CHANNEL, {
+      name: '常驻通知栏电量卡片',
+      importance: Notifications.AndroidImportance.LOW,
+      enableVibrate: false,
+      showBadge: false
+    }),
+    Notifications.setNotificationChannelAsync(UPDATE_NOTIFICATION_CHANNEL, {
+      name: '版本更新通知',
+      importance: Notifications.AndroidImportance.DEFAULT,
+      vibrationPattern: [0, 180],
+      lightColor: '#007AFF'
+    })
+  ])
+}
+
+/** 通知渠道每个进程只需创建一次，避免每次刷新都走一遍原生桥 */
+export function ensureNotificationChannels(): Promise<void> {
+  if (Platform.OS !== 'android') return Promise.resolve()
+  if (!channelsReady) {
+    channelsReady = createNotificationChannels().catch(error => {
+      channelsReady = null
+      throw error
+    })
+  }
+  return channelsReady
 }
 
 export async function requestNotificationAccess(): Promise<boolean> {
@@ -115,22 +130,58 @@ export async function requestNotificationAccess(): Promise<boolean> {
   return permission.status === 'granted'
 }
 
+const PUSH_TOKEN_TIMEOUT_MS = 4000
+let cachedPushToken: string | null = null
+let pendingPushToken: Promise<string | null> | null = null
+
+function withTimeout<T>(promise: Promise<T>, ms: number, fallback: T): Promise<T> {
+  return new Promise(resolve => {
+    const timer = setTimeout(() => resolve(fallback), ms)
+    promise.then(
+      value => {
+        clearTimeout(timer)
+        resolve(value)
+      },
+      () => {
+        clearTimeout(timer)
+        resolve(fallback)
+      }
+    )
+  })
+}
+
+async function fetchRemotePushToken(): Promise<string | null> {
+  await ensureNotificationChannels()
+  const permission = await Notifications.getPermissionsAsync()
+  if (permission.status !== 'granted') return null
+
+  const projectId = Constants.expoConfig?.extra?.eas?.projectId
+  if (!projectId) return null
+
+  const token = await Notifications.getExpoPushTokenAsync({ projectId })
+  return typeof token.data === 'string' ? token.data : null
+}
+
+/**
+ * 获取 Expo 推送 Token：结果按进程缓存，并且最多等待 4 秒。
+ * 国内网络访问 FCM / exp.host 经常超时，绝不能让它阻塞界面交互。
+ */
 export async function getRemotePushToken(): Promise<string | null> {
   if (Platform.OS !== 'android') return null
+  if (cachedPushToken) return cachedPushToken
 
-  try {
-    await ensureNotificationChannels()
-    const permission = await Notifications.getPermissionsAsync()
-    if (permission.status !== 'granted') return null
-
-    const projectId = Constants.expoConfig?.extra?.eas?.projectId
-    if (!projectId) return null
-
-    const token = await Notifications.getExpoPushTokenAsync({ projectId })
-    return typeof token.data === 'string' ? token.data : null
-  } catch {
-    return null
+  if (!pendingPushToken) {
+    pendingPushToken = fetchRemotePushToken()
+      .then(token => {
+        if (token) cachedPushToken = token
+        return token
+      })
+      .catch(() => null)
+      .finally(() => {
+        pendingPushToken = null
+      })
   }
+  return withTimeout(pendingPushToken, PUSH_TOKEN_TIMEOUT_MS, null)
 }
 
 export async function sendLowPowerNotification(

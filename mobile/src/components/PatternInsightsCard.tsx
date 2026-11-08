@@ -18,11 +18,11 @@ function pad2(val: number): string {
 }
 
 const HEATMAP_LEVEL_COLORS: Record<0 | 1 | 2 | 3 | 4, string> = {
-  0: 'rgba(118, 118, 128, 0.10)',
-  1: 'rgba(52, 199, 89, 0.24)',
-  2: 'rgba(52, 199, 89, 0.46)',
-  3: 'rgba(52, 199, 89, 0.72)',
-  4: '#248A3D'
+  0: colors.heat0,
+  1: colors.heat1,
+  2: colors.heat2,
+  3: colors.heat3,
+  4: colors.heat4
 }
 
 export function PatternInsightsCard({
@@ -89,7 +89,7 @@ export function PatternInsightsCard({
                 hapticTick()
                 setSelectedPeriodId(prev => (prev === period.id ? null : period.id))
               }}
-              style={[styles.legendCard, isSelected && styles.legendCardActive]}
+              style={({ pressed }) => [styles.legendCard, isSelected && styles.legendCardActive, pressed && { opacity: 0.7 }]}
             >
               <View style={styles.legendTopRow}>
                 <View style={styles.legendTitleRow}>
@@ -276,7 +276,7 @@ const styles = StyleSheet.create({
   },
   legendTime: {
     color: colors.textFaint,
-    fontSize: 10,
+    fontSize: 11,
     fontVariant: ['tabular-nums']
   },
   legendKwh: {
@@ -310,7 +310,7 @@ const styles = StyleSheet.create({
   },
   scaleLabel: {
     color: colors.textFaint,
-    fontSize: 10,
+    fontSize: 11,
     marginHorizontal: 2
   },
   scaleSwatch: {
@@ -333,7 +333,7 @@ const styles = StyleSheet.create({
   },
   heatmapHourTick: {
     color: colors.textFaint,
-    fontSize: 9,
+    fontSize: 11,
     fontVariant: ['tabular-nums']
   },
   heatmapMatrix: {
@@ -346,7 +346,7 @@ const styles = StyleSheet.create({
   heatmapDayLabel: {
     width: 36,
     color: colors.textMuted,
-    fontSize: 10,
+    fontSize: 11,
     fontVariant: ['tabular-nums']
   },
   heatmapDayLabelToday: {

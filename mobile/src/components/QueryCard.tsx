@@ -2,6 +2,13 @@ import { ActivityIndicator, Pressable, StyleSheet, Text, TextInput, View } from 
 
 import { CAMPUSES, type BuildingOption, type Campus } from '../types/api'
 import { colors, radii, spacing } from '../theme'
+import { SegmentedControl, type SegmentOption } from './SegmentedControl'
+
+const CAMPUS_OPTIONS: readonly SegmentOption<Campus>[] = CAMPUSES.map(item => ({
+  key: item,
+  label: item,
+  accessibilityLabel: `${item}校区`
+}))
 
 interface QueryCardProps {
   campus: Campus
@@ -34,24 +41,15 @@ export function QueryCard({
 }: QueryCardProps) {
   return (
     <View style={styles.card}>
-      <View style={styles.segmented} accessibilityRole="tablist">
-        {CAMPUSES.map(item => {
-          const selected = item === campus
-          return (
-            <Pressable
-              key={item}
-              onPress={() => onCampusChange(item)}
-              disabled={disabled || selected}
-              style={({ pressed }) => [styles.segment, selected && styles.segmentSelected, pressed && styles.pressed]}
-              accessibilityRole="tab"
-              accessibilityState={{ selected }}
-              accessibilityLabel={`${item}校区`}
-            >
-              <Text style={[styles.segmentText, selected && styles.segmentTextSelected]}>{item}</Text>
-            </Pressable>
-          )
-        })}
-      </View>
+      <SegmentedControl
+        options={CAMPUS_OPTIONS}
+        value={campus}
+        onChange={onCampusChange}
+        disabled={disabled}
+        height={42}
+        radius={13}
+        fontSize={15}
+      />
 
       <View style={styles.fieldGrid}>
         <View style={styles.fieldBlock}>
@@ -120,35 +118,6 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: colors.border,
     backgroundColor: colors.surface
-  },
-  segmented: {
-    flexDirection: 'row',
-    padding: spacing.xs,
-    borderRadius: radii.control + 1,
-    backgroundColor: colors.controlMuted
-  },
-  segment: {
-    flex: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-    minHeight: 42,
-    borderRadius: radii.small
-  },
-  segmentSelected: {
-    backgroundColor: colors.surface,
-    shadowColor: colors.text,
-    shadowOpacity: 0.07,
-    shadowRadius: 6,
-    shadowOffset: { width: 0, height: 2 },
-    elevation: 2
-  },
-  segmentText: {
-    color: colors.textMuted,
-    fontSize: 15,
-    fontWeight: '600'
-  },
-  segmentTextSelected: {
-    color: colors.accent
   },
   fieldGrid: {
     flexDirection: 'row',

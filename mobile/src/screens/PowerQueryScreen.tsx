@@ -156,6 +156,9 @@ export function PowerQueryScreen() {
   const persistenceQueue = useRef<Promise<void>>(Promise.resolve())
   const mobileTokenRef = useRef<string | null>(null)
   const dismissedUpdateVersionRef = useRef<string | null>(null)
+  const toggleSeqRef = useRef(0)
+  const toggleChainRef = useRef<Promise<void>>(Promise.resolve())
+  const thresholdSeqRef = useRef(0)
 
   campusRef.current = campus
   preferencesRef.current = preferences
@@ -543,6 +546,7 @@ export function PowerQueryScreen() {
       building: result.building,
       room: result.room
     }
+    toggleSeqRef.current += 1
     setMonitorBusy(true)
     setMonitorError(null)
     setMonitorFeedback(null)
@@ -559,16 +563,19 @@ export function PowerQueryScreen() {
       })
       const localHistory = await appendHistory(target, result.kwh, result.updatedAt)
       setHistory(localHistory)
-      try {
-        const pushToken = nextPreferences.notificationsEnabled ? await getRemotePushToken() : undefined
-        const remoteData = await syncServerWatch(target, nextPreferences, pushToken || undefined)
-        if (mountedRef.current) {
-          setServerStats(remoteData.stats)
-          setHistory(currentHistory => mergeHistory(currentHistory, asHistoryPoints(remoteData.items)))
+      // 服务器同步（含推送 Token）放到后台，不阻塞界面
+      void (async () => {
+        try {
+          const pushToken = nextPreferences.notificationsEnabled ? await getRemotePushToken() : undefined
+          const remoteData = await syncServerWatch(target, nextPreferences, pushToken || undefined)
+          if (mountedRef.current && sameRoom(preferencesRef.current.myRoom, target)) {
+            setServerStats(remoteData.stats)
+            setHistory(currentHistory => mergeHistory(currentHistory, asHistoryPoints(remoteData.items)))
+          }
+        } catch {
+          if (mountedRef.current) setMonitorError('同步失败，稍后重试')
         }
-      } catch {
-        if (mountedRef.current) setMonitorError('服务器监控登记失败，将在下次打开应用时重试')
-      }
+      })()
     } catch (error) {
       if (mountedRef.current) setMonitorError(errorMessage(error, '我的寝室保存失败'))
     } finally {
@@ -578,6 +585,7 @@ export function PowerQueryScreen() {
 
   const handleRemoveMine = useCallback(async () => {
     if (!preferencesRef.current.myRoom) return
+    toggleSeqRef.current += 1
     setMonitorBusy(true)
     setMonitorError(null)
     setMonitorFeedback(null)
@@ -610,18 +618,22 @@ export function PowerQueryScreen() {
     setMonitorFeedback(null)
     if (!nextPreferences.myRoom) return
     const roomToUpdate = nextPreferences.myRoom
+    const seq = ++thresholdSeqRef.current
 
     void (async () => {
       try {
         await resetMonitorAlertLock()
         const pushToken = nextPreferences.notificationsEnabled ? await getRemotePushToken() : undefined
+        // 连续点击步进器时，只让最后一次同步生效
+        if (thresholdSeqRef.current !== seq || !mountedRef.current) return
         await syncServerWatch(roomToUpdate, nextPreferences, pushToken || undefined)
+        if (thresholdSeqRef.current !== seq) return
         if (nextPreferences.monitoringEnabled) {
           await runMonitorNow().catch(() => undefined)
           await refreshMonitorMeta()
         }
       } catch {
-        if (mountedRef.current) setMonitorError('提醒阈值同步失败，将在下次打开应用时重试')
+        if (mountedRef.current) setMonitorError('阈值同步失败')
       }
     })()
   }, [refreshMonitorMeta, syncServerWatch, updatePreferences])
@@ -631,59 +643,76 @@ export function PowerQueryScreen() {
     if (!roomToMonitor) return
 
     const wasEnabled = preferencesRef.current.monitoringEnabled
-    setMonitorBusy(true)
+    const seq = ++toggleSeqRef.current
+    const isCurrent = () => mountedRef.current && toggleSeqRef.current === seq
     setMonitorError(null)
     setMonitorFeedback(null)
-    try {
-      if (wasEnabled) {
-        const nextPreferences = {
-          ...preferencesRef.current,
-          monitoringEnabled: false,
-          notificationsEnabled: false
-        }
-        await syncServerWatch(roomToMonitor, nextPreferences).catch(() => undefined)
-        await syncHourlyMonitor(false).catch(() => undefined)
-        updatePreferences({ monitoringEnabled: false, notificationsEnabled: false })
-        setMonitorFeedback('低电量提醒与后台守护已关闭')
-      } else {
-        const granted = await requestNotificationAccess()
-        if (!granted) throw new Error('请允许通知权限后再开启提醒')
 
-        await resetMonitorAlertLock()
-        const nextPreferences = {
-          ...preferencesRef.current,
-          monitoringEnabled: true,
-          notificationsEnabled: true
-        }
-        const pushToken = await getRemotePushToken()
-        await syncMobileDevice(pushToken).catch(() => undefined)
-        const remoteData = await syncServerWatch(roomToMonitor, nextPreferences, pushToken || undefined)
-        updatePreferences({ monitoringEnabled: true, notificationsEnabled: true })
-        await persistenceQueue.current
-        await syncHourlyMonitor(true).catch(() => undefined)
-        const localHistory = await runMonitorNow()
-        await refreshMonitorMeta()
-        if (mountedRef.current && sameRoom(preferencesRef.current.myRoom, roomToMonitor)) {
-          setServerStats(remoteData.stats)
-          setHistory(current => mergeHistory(current, asHistoryPoints(remoteData.items), localHistory))
-          setMonitorFeedback('守护已开启，低于阈值时将立即通知')
-        }
-      }
-    } catch (error) {
-      if (!wasEnabled) {
+    if (wasEnabled) {
+      // 关闭：开关立即响应，网络与后台任务清理在后台完成
+      const nextPreferences = updatePreferences({ monitoringEnabled: false, notificationsEnabled: false })
+      toggleChainRef.current = toggleChainRef.current.then(async () => {
         await syncHourlyMonitor(false).catch(() => undefined)
-        updatePreferences({ monitoringEnabled: false, notificationsEnabled: false })
-      }
-      if (mountedRef.current) setMonitorError(errorMessage(error, '提醒开启失败'))
-    } finally {
-      if (mountedRef.current) setMonitorBusy(false)
+        await syncServerWatch(roomToMonitor, nextPreferences).catch(() => undefined)
+      })
+      return
     }
+
+    // 开启：只有系统权限弹窗需要等待，其余全部异步进行
+    setMonitorBusy(true)
+    let granted = false
+    try {
+      granted = await requestNotificationAccess()
+    } catch {
+      granted = false
+    }
+    if (mountedRef.current) setMonitorBusy(false)
+    if (!isCurrent()) return
+    if (!granted) {
+      setMonitorError('未获得通知权限')
+      return
+    }
+
+    const nextPreferences = updatePreferences({ monitoringEnabled: true, notificationsEnabled: true })
+
+    toggleChainRef.current = toggleChainRef.current.then(async () => {
+      await resetMonitorAlertLock().catch(() => undefined)
+      await persistenceQueue.current
+      if (!isCurrent()) return
+
+      let localReady = true
+      await syncHourlyMonitor(true).catch(() => {
+        localReady = false
+      })
+      if (!isCurrent()) {
+        // 用户在注册过程中又关掉了开关
+        if (!preferencesRef.current.monitoringEnabled) await syncHourlyMonitor(false).catch(() => undefined)
+        return
+      }
+
+      const pushToken = await getRemotePushToken()
+      void syncMobileDevice(pushToken).catch(() => undefined)
+      const remoteData = await syncServerWatch(roomToMonitor, nextPreferences, pushToken || undefined).catch(() => null)
+      if (!isCurrent()) return
+
+      const localHistory = await runMonitorNow().catch((): HistoryPoint[] => [])
+      await refreshMonitorMeta()
+      if (!isCurrent() || !sameRoom(preferencesRef.current.myRoom, roomToMonitor)) return
+
+      if (remoteData) {
+        setServerStats(remoteData.stats)
+        setHistory(current => mergeHistory(current, asHistoryPoints(remoteData.items), localHistory))
+      } else if (localHistory.length > 0) {
+        setHistory(current => mergeHistory(current, localHistory))
+      }
+
+      if (!remoteData && !localReady) setMonitorError('后台提醒暂不可用')
+    }).catch(() => undefined)
   }, [refreshMonitorMeta, syncMobileDevice, syncServerWatch, updatePreferences])
 
   const handleToggleOngoing = useCallback(() => {
     const nextVal = !preferencesRef.current.ongoingNotificationEnabled
     updatePreferences({ ongoingNotificationEnabled: nextVal })
-    setMonitorFeedback(nextVal ? '已开启常驻通知栏电量卡片' : '已关闭常驻通知栏电量卡片')
   }, [updatePreferences])
 
   const handleTestNotification = useCallback(async () => {
@@ -696,9 +725,6 @@ export function PowerQueryScreen() {
         result?.kwh ?? analytics.summary.current,
         preferencesRef.current.threshold
       )
-      if (mountedRef.current) {
-        setMonitorFeedback('测试通知已发出，请查看手机顶部横幅或通知中心')
-      }
     } catch (error) {
       if (mountedRef.current) {
         setMonitorError(errorMessage(error, '测试通知发送失败'))
@@ -992,7 +1018,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     paddingVertical: 8,
     borderRadius: radii.pill,
-    backgroundColor: 'rgba(118, 118, 128, 0.12)'
+    backgroundColor: colors.controlMuted
   },
   roomPillText: {
     flexShrink: 1,
