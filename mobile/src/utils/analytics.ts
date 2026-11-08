@@ -202,12 +202,19 @@ export function analyzePowerHistory(
   const dayAgoMs = nowMs - DAY_MS
   const hourProfile = new Array<number>(24).fill(0)
 
+  // 学校系统的读数是分段更新的（常常连续数小时不变，再一次掉约 1 度），
+  // 所以一次下降不能只算在读数变化的那一小时，而要摊到“上一次变化”到“这一次变化”之间。
+  let runStartMs = samples.length > 0 ? samples[0].timeMs : 0
+
   for (let i = 1; i < samples.length; i += 1) {
     const prev = samples[i - 1]
     const curr = samples[i]
     const intervalMs = curr.timeMs - prev.timeMs
     const intervalHours = intervalMs / HOUR_MS
-    if (intervalHours <= 0 || intervalHours > MAX_INTERVAL_HOURS) continue
+    if (intervalHours <= 0 || intervalHours > MAX_INTERVAL_HOURS) {
+      runStartMs = curr.timeMs
+      continue
+    }
 
     const drop = prev.kwh - curr.kwh
     if (drop < RECHARGE_DROP_THRESHOLD || curr.recharged) {
@@ -215,20 +222,25 @@ export function analyzePowerHistory(
       if (drop < RECHARGE_DROP_THRESHOLD) {
         lastRechargeAmount = round(-drop, 1)
       }
+      runStartMs = curr.timeMs
       continue
     }
 
-    if (drop >= 0 && drop < 100 && drop / intervalHours <= MAX_HOURLY_RATE) {
+    const spanMs = Math.max(intervalMs, curr.timeMs - runStartMs)
+    const spanHours = spanMs / HOUR_MS
+    if (drop >= 0 && drop < 100 && drop / spanHours <= MAX_HOURLY_RATE) {
       totalConsumed += drop
       validHours += intervalHours
+      if (drop === 0) continue
 
-      const overlap24h = Math.max(0, Math.min(curr.timeMs, nowMs) - Math.max(prev.timeMs, dayAgoMs))
+      const spanStartMs = curr.timeMs - spanMs
+      const overlap24h = Math.max(0, Math.min(curr.timeMs, nowMs) - Math.max(spanStartMs, dayAgoMs))
       if (overlap24h > 0) {
-        consumed24h += drop * (overlap24h / intervalMs)
+        consumed24h += drop * (overlap24h / spanMs)
       }
 
-      // 将 [prev.timeMs, curr.timeMs] 按自然整点切分并分摊耗电量
-      let cursor = prev.timeMs
+      // 将 [spanStartMs, curr.timeMs] 按自然整点切分并分摊耗电量
+      let cursor = spanStartMs
       while (cursor < curr.timeMs) {
         const cursorDate = new Date(cursor)
         const nextHourDate = new Date(cursor)
@@ -238,7 +250,7 @@ export function analyzePowerHistory(
         const sliceMs = Math.max(0, sliceEnd - cursor)
 
         if (sliceMs > 0) {
-          const shareKwh = drop * (sliceMs / intervalMs)
+          const shareKwh = drop * (sliceMs / spanMs)
           const dateKey = toLocalDateKey(cursor)
           const hourIndex = cursorDate.getHours()
           hourProfile[hourIndex] += shareKwh
@@ -258,8 +270,10 @@ export function analyzePowerHistory(
         }
         cursor = sliceEnd > cursor ? sliceEnd : cursor + 60_000
       }
+      runStartMs = curr.timeMs
     } else if (Math.abs(drop) <= 2) {
       validHours += intervalHours
+      runStartMs = curr.timeMs
     }
   }
 
