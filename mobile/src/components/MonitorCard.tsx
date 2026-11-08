@@ -143,15 +143,17 @@ export function MonitorCard({
         </View>
       </View>
 
-      <View style={styles.listRow}>
-        <Text style={styles.rowTitle}>通知栏常驻电量</Text>
-        <IosSwitch
-          value={enabled && ongoingEnabled}
-          disabled={busy || !enabled}
-          onPress={onToggleOngoing}
-          label="切换通知栏常驻电量"
-        />
-      </View>
+      {enabled ? (
+        <View style={styles.listRow}>
+          <Text style={styles.rowTitle}>通知栏常驻电量</Text>
+          <IosSwitch
+            value={ongoingEnabled}
+            disabled={busy}
+            onPress={onToggleOngoing}
+            label="切换通知栏常驻电量"
+          />
+        </View>
+      ) : null}
 
       <Pressable
         onPress={onOpenBatterySettings}
