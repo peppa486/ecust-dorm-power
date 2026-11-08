@@ -419,8 +419,8 @@ export function analyzePowerHistory(
     }
   }
   const peakWindowLabel = bestWindowSum > 0.02
-    ? `${pad2(bestStartHour)}:00–${pad2((bestStartHour + 2) % 24)}:00`
-    : '暂无峰值'
+    ? `${pad2(bestStartHour)}–${pad2((bestStartHour + 2) % 24)}时`
+    : '--'
 
   // 预计耗尽日期与触达阈值时间
   let estimatedDepletionLabel = '采样积累中'

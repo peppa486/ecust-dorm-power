@@ -15,7 +15,6 @@ interface HeroTelemetryCardProps {
   onRefresh?: () => void
   onSetMine?: () => void
   onRemoveMine?: () => void
-  onOpenRoomSwitcher?: () => void
 }
 
 export function HeroTelemetryCard({
@@ -27,15 +26,13 @@ export function HeroTelemetryCard({
   refreshing = false,
   onRefresh,
   onSetMine,
-  onRemoveMine,
-  onOpenRoomSwitcher
+  onRemoveMine
 }: HeroTelemetryCardProps) {
   const kwh = result?.kwh ?? summary.current ?? 0
   const hasReading = result !== null || summary.current !== null
   const status = getPowerStatus(kwh, threshold)
   const updatedAt = result?.updatedAt ? formatUpdatedAt(result.updatedAt) : ''
 
-  // 容量进度条：以 100 度为满格参考（若当前超过 100 度则以当前值向上取整）
   const maxReference = Math.max(100, Math.ceil(kwh / 50) * 50)
   const fillRatio = hasReading ? Math.max(0.03, Math.min(1, kwh / maxReference)) : 0
   const thresholdRatio = Math.max(0.05, Math.min(0.95, threshold / maxReference))
@@ -48,14 +45,16 @@ export function HeroTelemetryCard({
 
   return (
     <View style={styles.card}>
-      {/* 顶部小标题与更新时间 */}
+      {/* 顶栏：寝室名 + 刷新 */}
       <View style={styles.eyebrowRow}>
         <View style={styles.eyebrowLeft}>
-          <Text style={styles.eyebrowLabel}>当前剩余电量</Text>
+          <Text style={styles.eyebrowLabel} numberOfLines={1}>
+            {result?.displayName || '剩余电量'}
+          </Text>
           {result?.cached ? <Text style={styles.cacheTag}>缓存</Text> : null}
         </View>
         <View style={styles.eyebrowRight}>
-          {updatedAt ? <Text style={styles.updatedText}>更新于 {updatedAt}</Text> : null}
+          {updatedAt ? <Text style={styles.updatedText}>{updatedAt}</Text> : null}
           {onRefresh ? (
             <Pressable
               onPress={onRefresh}
@@ -63,7 +62,7 @@ export function HeroTelemetryCard({
               hitSlop={10}
               style={({ pressed }) => [styles.refreshPill, pressed && styles.pressed]}
               accessibilityRole="button"
-              accessibilityLabel="刷新当前电量"
+              accessibilityLabel="刷新电量"
             >
               {refreshing ? (
                 <ActivityIndicator size="small" color={colors.iosBlue} />
@@ -81,7 +80,7 @@ export function HeroTelemetryCard({
           <Text style={styles.heroValue}>
             {result ? displayKwh(result) : (summary.current !== null ? formatNumberCompact(summary.current, 2) : '--')}
           </Text>
-          <Text style={styles.heroUnit}>度 (kWh)</Text>
+          <Text style={styles.heroUnit}>度</Text>
         </View>
 
         {hasReading ? (
@@ -92,32 +91,26 @@ export function HeroTelemetryCard({
         ) : null}
       </View>
 
-      {/* iOS 电池风格容量条（含阈值刻度线） */}
-      <View style={styles.capacitySection}>
-        <View style={styles.capacityTrack}>
-          <View
-            style={[
-              styles.capacityFill,
-              {
-                width: `${Math.round(fillRatio * 100)}%`,
-                backgroundColor: barColor
-              }
-            ]}
-          />
-          <View
-            style={[
-              styles.thresholdMarker,
-              { left: `${Math.round(thresholdRatio * 100)}%` }
-            ]}
-          />
-        </View>
-        <View style={styles.capacitySubRow}>
-          <Text style={styles.capacityHint}>{summary.estimatedDepletionLabel}</Text>
-          <Text style={styles.capacityHint}>预警线 {threshold} 度</Text>
-        </View>
+      {/* 容量条 */}
+      <View style={styles.capacityTrack}>
+        <View
+          style={[
+            styles.capacityFill,
+            {
+              width: `${Math.round(fillRatio * 100)}%`,
+              backgroundColor: barColor
+            }
+          ]}
+        />
+        <View
+          style={[
+            styles.thresholdMarker,
+            { left: `${Math.round(thresholdRatio * 100)}%` }
+          ]}
+        />
       </View>
 
-      {/* 四宫格核心统计指标 */}
+      {/* 四宫格核心指标 */}
       <View style={styles.kpiGrid}>
         <View style={styles.kpiItem}>
           <Text style={styles.kpiLabel}>预计可用</Text>
@@ -148,33 +141,22 @@ export function HeroTelemetryCard({
         </View>
       </View>
 
-      {/* 寝室归属操作栏 */}
-      <View style={styles.footerRow}>
-        <Text style={styles.roomMetaText} numberOfLines={1}>
-          {result?.displayName || '尚未选择寝室'}
-        </Text>
-
-        <View style={styles.footerActions}>
-          {onOpenRoomSwitcher ? (
-            <Pressable
-              onPress={onOpenRoomSwitcher}
-              style={({ pressed }) => [styles.secondaryChip, pressed && styles.pressed]}
-              accessibilityRole="button"
-              accessibilityLabel="查询其他寝室"
-            >
-              <Text style={styles.secondaryChipText}>查其他寝室</Text>
-            </Pressable>
-          ) : null}
-
+      {/* 绑定操作 */}
+      {(isMine && onRemoveMine) || (!isMine && onSetMine && result) ? (
+        <View style={styles.footerRow}>
+          <Text style={styles.roomMetaText}>
+            {isMine ? '已绑定为常住寝室' : '设为常住寝室以记录整点趋势'}
+          </Text>
           {isMine && onRemoveMine ? (
             <Pressable
               onPress={onRemoveMine}
               disabled={busy}
-              style={({ pressed }) => [styles.secondaryChip, pressed && styles.pressed, busy && styles.disabled]}
+              hitSlop={8}
+              style={({ pressed }) => [pressed && styles.pressed, busy && styles.disabled]}
               accessibilityRole="button"
-              accessibilityLabel="取消我的寝室"
+              accessibilityLabel="取消绑定"
             >
-              <Text style={styles.secondaryChipText}>{busy ? '处理中…' : '取消绑定'}</Text>
+              <Text style={styles.unbindLink}>{busy ? '处理中…' : '取消绑定'}</Text>
             </Pressable>
           ) : onSetMine && result ? (
             <Pressable
@@ -188,7 +170,7 @@ export function HeroTelemetryCard({
             </Pressable>
           ) : null}
         </View>
-      </View>
+      ) : null}
     </View>
   )
 }
@@ -204,16 +186,19 @@ const styles = StyleSheet.create({
   eyebrowRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'space-between'
+    justifyContent: 'space-between',
+    gap: spacing.sm
   },
   eyebrowLeft: {
+    flex: 1,
     flexDirection: 'row',
     alignItems: 'center',
     gap: 6
   },
   eyebrowLabel: {
-    color: colors.textMuted,
-    fontSize: 13,
+    flexShrink: 1,
+    color: colors.textSecondary,
+    fontSize: 14,
     fontWeight: '600'
   },
   cacheTag: {
@@ -228,7 +213,7 @@ const styles = StyleSheet.create({
   eyebrowRight: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 10
+    gap: 8
   },
   updatedText: {
     color: colors.textFaint,
@@ -236,7 +221,7 @@ const styles = StyleSheet.create({
     fontVariant: ['tabular-nums']
   },
   refreshPill: {
-    paddingHorizontal: 8,
+    paddingHorizontal: 9,
     paddingVertical: 3,
     borderRadius: radii.pill,
     backgroundColor: colors.iosBlueSurface
@@ -250,7 +235,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'flex-end',
     justifyContent: 'space-between',
-    marginTop: spacing.sm
+    marginTop: 6
   },
   numberBlock: {
     flexDirection: 'row',
@@ -266,15 +251,15 @@ const styles = StyleSheet.create({
   heroUnit: {
     marginLeft: 6,
     color: colors.textMuted,
-    fontSize: 15,
+    fontSize: 16,
     fontWeight: '600'
   },
   statusBadge: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 6,
-    paddingHorizontal: 11,
-    paddingVertical: 6,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
     borderRadius: radii.pill,
     marginBottom: 8
   },
@@ -314,11 +299,9 @@ const styles = StyleSheet.create({
   text_danger: {
     color: colors.iosRedDark
   },
-  capacitySection: {
-    marginTop: spacing.md
-  },
   capacityTrack: {
-    height: 9,
+    height: 8,
+    marginTop: spacing.md,
     borderRadius: radii.pill,
     backgroundColor: colors.control,
     overflow: 'hidden',
@@ -335,16 +318,6 @@ const styles = StyleSheet.create({
     width: 2,
     backgroundColor: 'rgba(28, 28, 30, 0.35)'
   },
-  capacitySubRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    marginTop: 6
-  },
-  capacityHint: {
-    color: colors.textMuted,
-    fontSize: 11,
-    fontVariant: ['tabular-nums']
-  },
   kpiGrid: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -359,7 +332,7 @@ const styles = StyleSheet.create({
   },
   kpiDivider: {
     width: hairlineWidth,
-    height: 26,
+    height: 24,
     backgroundColor: colors.separator,
     marginHorizontal: 8
   },
@@ -394,18 +367,12 @@ const styles = StyleSheet.create({
   },
   roomMetaText: {
     flex: 1,
-    color: colors.textSecondary,
-    fontSize: 12,
-    fontWeight: '500'
-  },
-  footerActions: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8
+    color: colors.textMuted,
+    fontSize: 12
   },
   primaryChip: {
     paddingHorizontal: 13,
-    paddingVertical: 7,
+    paddingVertical: 6,
     borderRadius: radii.pill,
     backgroundColor: colors.iosBlue
   },
@@ -414,16 +381,10 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: '600'
   },
-  secondaryChip: {
-    paddingHorizontal: 11,
-    paddingVertical: 6,
-    borderRadius: radii.pill,
-    backgroundColor: colors.control
-  },
-  secondaryChipText: {
-    color: colors.textSecondary,
+  unbindLink: {
+    color: colors.textMuted,
     fontSize: 12,
-    fontWeight: '600'
+    fontWeight: '500'
   },
   disabled: {
     opacity: 0.5

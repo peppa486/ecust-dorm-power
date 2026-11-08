@@ -3,6 +3,7 @@ import { Pressable, StyleSheet, Text, View } from 'react-native'
 
 import { cardShadow, colors, hairlineWidth, radii, spacing } from '../theme'
 import type { HeatmapRow, PeriodShare } from '../utils/analytics'
+import { hapticTick } from '../utils/haptics'
 import { formatNumberCompact } from '../utils/power'
 
 interface PatternInsightsCardProps {
@@ -27,8 +28,7 @@ const HEATMAP_LEVEL_COLORS: Record<0 | 1 | 2 | 3 | 4, string> = {
 export function PatternInsightsCard({
   periods,
   heatmap,
-  rechargeCount,
-  lastRechargeAmount
+  rechargeCount
 }: PatternInsightsCardProps) {
   const [selectedPeriodId, setSelectedPeriodId] = useState<string | null>(null)
   const [selectedCell, setSelectedCell] = useState<{
@@ -38,31 +38,19 @@ export function PatternInsightsCard({
   } | null>(null)
 
   const totalPeriodKwh = periods.reduce((sum, item) => sum + item.kwh, 0)
-  const activePeriod = periods.find(p => p.id === selectedPeriodId) || null
 
   return (
     <View style={styles.card}>
-      {/* 第一部分：时段占比分段条与四宫格图例（iOS 储存空间与电池活动风格） */}
+      {/* 第一部分：时段占比 */}
       <View style={styles.sectionHeader}>
-        <View style={styles.headerTextWrap}>
-          <Text style={styles.sectionTitle}>时段用电结构</Text>
-          <Text style={styles.sectionSubtitle}>
-            {activePeriod
-              ? `${activePeriod.label} (${activePeriod.rangeLabel}) 累计 ${formatNumberCompact(activePeriod.kwh, 2)} 度 · 占 ${activePeriod.percentage}%`
-              : `近 7 日累计统计 ${formatNumberCompact(totalPeriodKwh, 1)} 度 · 点击色块查看`}
-          </Text>
-        </View>
+        <Text style={styles.sectionTitle}>时段占比</Text>
         {rechargeCount > 0 ? (
           <View style={styles.rechargeTag}>
-            <Text style={styles.rechargeTagText}>
-              已充 {rechargeCount} 次
-              {lastRechargeAmount ? ` (最近+${formatNumberCompact(lastRechargeAmount, 0)}度)` : ''}
-            </Text>
+            <Text style={styles.rechargeTagText}>已充 {rechargeCount} 次</Text>
           </View>
         ) : null}
       </View>
 
-      {/* iOS 储存空间风格分段胶囊比例条 */}
       <View style={styles.proportionalBar}>
         {totalPeriodKwh > 0.01 ? (
           periods.map(period => {
@@ -71,7 +59,10 @@ export function PatternInsightsCard({
             return (
               <Pressable
                 key={period.id}
-                onPress={() => setSelectedPeriodId(prev => (prev === period.id ? null : period.id))}
+                onPress={() => {
+                  hapticTick()
+                  setSelectedPeriodId(prev => (prev === period.id ? null : period.id))
+                }}
                 style={[
                   styles.proportionalSegment,
                   {
@@ -88,14 +79,16 @@ export function PatternInsightsCard({
         )}
       </View>
 
-      {/* 双列四时段图例与环形比例条 */}
       <View style={styles.legendGrid}>
         {periods.map(period => {
           const isSelected = selectedPeriodId === period.id
           return (
             <Pressable
               key={period.id}
-              onPress={() => setSelectedPeriodId(prev => (prev === period.id ? null : period.id))}
+              onPress={() => {
+                hapticTick()
+                setSelectedPeriodId(prev => (prev === period.id ? null : period.id))
+              }}
               style={[styles.legendCard, isSelected && styles.legendCardActive]}
             >
               <View style={styles.legendTopRow}>
@@ -114,34 +107,30 @@ export function PatternInsightsCard({
         })}
       </View>
 
-      {/* 分割线 */}
       <View style={styles.divider} />
 
-      {/* 第二部分：7×24 小时用电密度热力矩阵（Apple Fitness 单色系深浅） */}
+      {/* 第二部分：7×24h 热力图 */}
       <View style={styles.heatmapHeader}>
-        <View style={styles.headerTextWrap}>
-          <Text style={styles.sectionTitle}>7 × 24h 用电密度矩阵</Text>
-          <Text style={styles.sectionSubtitle}>
-            {selectedCell
-              ? `${selectedCell.dateLabel} ${pad2(selectedCell.hour)}:00–${pad2((selectedCell.hour + 1) % 24)}:00 · 耗电 ${formatNumberCompact(selectedCell.kwh, 2)} 度`
-              : '颜色越深代表该小时功率越高 · 点击方格查看具体度数'}
-          </Text>
-        </View>
+        <Text style={styles.sectionTitle}>7 × 24h 热力图</Text>
 
-        {/* 5 档色阶图例 */}
-        <View style={styles.scaleRow}>
-          <Text style={styles.scaleLabel}>低</Text>
-          {([0, 1, 2, 3, 4] as const).map(lvl => (
-            <View
-              key={`lvl-${lvl}`}
-              style={[styles.scaleSwatch, { backgroundColor: HEATMAP_LEVEL_COLORS[lvl] }]}
-            />
-          ))}
-          <Text style={styles.scaleLabel}>高</Text>
-        </View>
+        {selectedCell ? (
+          <Text style={styles.cellCallout}>
+            {selectedCell.dateLabel} {pad2(selectedCell.hour)}:00 · {formatNumberCompact(selectedCell.kwh, 2)}度
+          </Text>
+        ) : (
+          <View style={styles.scaleRow}>
+            <Text style={styles.scaleLabel}>低</Text>
+            {([0, 1, 2, 3, 4] as const).map(lvl => (
+              <View
+                key={`lvl-${lvl}`}
+                style={[styles.scaleSwatch, { backgroundColor: HEATMAP_LEVEL_COLORS[lvl] }]}
+              />
+            ))}
+            <Text style={styles.scaleLabel}>高</Text>
+          </View>
+        )}
       </View>
 
-      {/* 热力图小时标尺 */}
       <View style={styles.heatmapHourRuler}>
         <View style={styles.heatmapDayColSpacer} />
         <View style={styles.heatmapHoursHeaderRow}>
@@ -153,7 +142,6 @@ export function PatternInsightsCard({
         </View>
       </View>
 
-      {/* 7 行 × 24 列热力矩阵 */}
       <View style={styles.heatmapMatrix}>
         {heatmap.map((row, rowIndex) => (
           <View key={row.dateKey} style={styles.heatmapRow}>
@@ -167,13 +155,14 @@ export function PatternInsightsCard({
                 return (
                   <Pressable
                     key={`${row.dateKey}-${cell.hour}`}
-                    onPress={() =>
+                    onPress={() => {
+                      hapticTick()
                       setSelectedCell(prev =>
                         prev && prev.dateLabel === row.label && prev.hour === cell.hour
                           ? null
                           : { dateLabel: row.label, hour: cell.hour, kwh: cell.kwh }
                       )
-                    }
+                    }}
                     style={[
                       styles.heatmapCell,
                       {
@@ -202,13 +191,9 @@ const styles = StyleSheet.create({
   },
   sectionHeader: {
     flexDirection: 'row',
-    alignItems: 'flex-start',
+    alignItems: 'center',
     justifyContent: 'space-between',
     gap: spacing.sm
-  },
-  headerTextWrap: {
-    flex: 1,
-    flexShrink: 1
   },
   sectionTitle: {
     color: colors.text,
@@ -216,15 +201,9 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     letterSpacing: -0.3
   },
-  sectionSubtitle: {
-    marginTop: 2,
-    color: colors.textMuted,
-    fontSize: 11,
-    fontVariant: ['tabular-nums']
-  },
   rechargeTag: {
     paddingHorizontal: 8,
-    paddingVertical: 4,
+    paddingVertical: 3,
     borderRadius: radii.pill,
     backgroundColor: colors.iosAmberSurface
   },
@@ -236,8 +215,8 @@ const styles = StyleSheet.create({
   },
   proportionalBar: {
     flexDirection: 'row',
-    height: 11,
-    borderRadius: 6,
+    height: 10,
+    borderRadius: 5,
     overflow: 'hidden',
     gap: 2.5,
     marginTop: spacing.md,
@@ -313,16 +292,21 @@ const styles = StyleSheet.create({
   },
   heatmapHeader: {
     flexDirection: 'row',
-    alignItems: 'flex-start',
+    alignItems: 'center',
     justifyContent: 'space-between',
     gap: spacing.sm,
     marginBottom: spacing.sm
   },
+  cellCallout: {
+    color: colors.textSecondary,
+    fontSize: 12,
+    fontWeight: '600',
+    fontVariant: ['tabular-nums']
+  },
   scaleRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 3,
-    marginTop: 2
+    gap: 3
   },
   scaleLabel: {
     color: colors.textFaint,

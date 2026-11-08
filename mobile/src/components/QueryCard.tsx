@@ -85,9 +85,10 @@ export function QueryCard({
             maxLength={8}
             autoCapitalize="characters"
             autoCorrect={false}
-            placeholder="202"
+            placeholder="输入室号"
             placeholderTextColor={colors.textFaint}
             returnKeyType="done"
+            onSubmitEditing={onQuery}
             style={[styles.roomInput, disabled && styles.fieldDisabled]}
             accessibilityLabel="寝室号"
           />
@@ -96,8 +97,12 @@ export function QueryCard({
 
       <Pressable
         onPress={onQuery}
-        disabled={disabled || queryLoading || buildingsLoading || !building}
-        style={({ pressed }) => [styles.primaryButton, pressed && styles.pressed, (disabled || queryLoading || buildingsLoading || !building) && styles.primaryButtonDisabled]}
+        disabled={disabled || queryLoading || buildingsLoading || !building || !room.trim()}
+        style={({ pressed }) => [
+          styles.primaryButton,
+          pressed && styles.pressed,
+          (disabled || queryLoading || buildingsLoading || !building || !room.trim()) && styles.primaryButtonDisabled
+        ]}
         accessibilityRole="button"
         accessibilityLabel="查询电量"
       >

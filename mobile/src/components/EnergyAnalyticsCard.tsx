@@ -16,6 +16,7 @@ import type {
   ForecastPoint,
   HourlyDayRecord
 } from '../utils/analytics'
+import { hapticLight, hapticTick } from '../utils/haptics'
 import { formatNumberCompact, formatUpdatedAt } from '../utils/power'
 
 type ChartTab = 'hourly' | 'daily' | 'balance'
@@ -27,6 +28,9 @@ interface EnergyAnalyticsCardProps {
   forecastPoints: ForecastPoint[]
   dailyAverage: number | null
   threshold: number
+  showDemoToggle?: boolean
+  demoActive?: boolean
+  onToggleDemo?: () => void
 }
 
 const CHART_HEIGHT = 164
@@ -34,10 +38,6 @@ const DETAIL_CHART_HEIGHT = 250
 const CHART_PADDING = 10
 const DETAIL_POINT_WIDTH = 14
 const GRID_RATIOS = [0.25, 0.5, 0.75]
-
-function pad2(val: number): string {
-  return String(val).padStart(2, '0')
-}
 
 interface LineCanvasProps {
   points: HistoryPoint[]
@@ -141,7 +141,6 @@ function BalanceLineCanvas({
         { height, width: fluid ? undefined : width }
       ]}
     >
-      {/* 横向参考网格线 */}
       {GRID_RATIOS.map(ratio => (
         <View
           key={`grid-${ratio}`}
@@ -153,7 +152,6 @@ function BalanceLineCanvas({
         />
       ))}
 
-      {/* 低电量阈值警戒线 */}
       {thresholdY >= CHART_PADDING && thresholdY <= height - CHART_PADDING ? (
         <View
           pointerEvents="none"
@@ -163,7 +161,6 @@ function BalanceLineCanvas({
         </View>
       ) : null}
 
-      {/* 历史实线线段 */}
       {coordinates.slice(1).map((point, index) => {
         const previous = coordinates[index]
         const dx = point.x - previous.x
@@ -188,7 +185,6 @@ function BalanceLineCanvas({
         )
       })}
 
-      {/* 未来耗尽预测线段（浅蓝虚线质感） */}
       {forecastCoords.slice(1).map((point, index) => {
         const previous = forecastCoords[index]
         const dx = point.x - previous.x
@@ -212,7 +208,6 @@ function BalanceLineCanvas({
         )
       })}
 
-      {/* 节点与触控热区 */}
       {coordinates.map((point, index) => {
         const isLast = index === coordinates.length - 1
         const isSelected = selectedIndex === index
@@ -220,7 +215,10 @@ function BalanceLineCanvas({
         return (
           <Pressable
             key={`pt-${index}`}
-            onPress={() => onSelectPoint?.(index)}
+            onPress={() => {
+              hapticTick()
+              onSelectPoint?.(index)
+            }}
             hitSlop={8}
             style={[
               styles.pointHitBox,
@@ -246,7 +244,6 @@ function BalanceLineCanvas({
         )
       })}
 
-      {/* 右侧上下极值刻度 */}
       <Text pointerEvents="none" style={[styles.canvasYLabel, { top: 6 }]}>
         {max}度
       </Text>
@@ -263,10 +260,13 @@ export function EnergyAnalyticsCard({
   dailyBars,
   forecastPoints,
   dailyAverage,
-  threshold
+  threshold,
+  showDemoToggle = false,
+  demoActive = false,
+  onToggleDemo
 }: EnergyAnalyticsCardProps) {
   const [activeTab, setActiveTab] = useState<ChartTab>('hourly')
-  const [dayOffset, setDayOffset] = useState(0) // 0 = 最新一天（今天），1 = 昨天...
+  const [dayOffset, setDayOffset] = useState(0)
   const [selectedHour, setSelectedHour] = useState<number | null>(null)
   const [selectedDailyIndex, setSelectedDailyIndex] = useState<number | null>(null)
   const [selectedBalanceIdx, setSelectedBalanceIdx] = useState<number | null>(null)
@@ -279,14 +279,12 @@ export function EnergyAnalyticsCard({
   const activeDayIndex = Math.max(0, hourlyDays.length - 1 - clampedOffset)
   const currentDay: HourlyDayRecord | undefined = hourlyDays[activeDayIndex]
 
-  // 24h 分时柱状图最大值
   const hourlyMax = useMemo(() => {
     if (!currentDay) return 1
     const maxVal = Math.max(...currentDay.hours.map(h => h.kwh), 0.4)
     return Math.ceil(maxVal * 10) / 10
   }, [currentDay])
 
-  // 近 14 天每日耗电柱状图数据（默认展示最近 10 天以保证柱宽舒适）
   const recentDailyBars = useMemo(() => dailyBars.slice(-10), [dailyBars])
   const dailyMax = useMemo(() => {
     const values = recentDailyBars.map(d => d.kwh)
@@ -299,12 +297,14 @@ export function EnergyAnalyticsCard({
   const detailBalancePoints = useMemo(() => points.slice(-336), [points])
 
   function handleSwitchTab(tab: ChartTab) {
+    if (tab !== activeTab) hapticTick()
     setActiveTab(tab)
   }
 
   function handleJumpToDayHourly(dateKey: string) {
     const idx = hourlyDays.findIndex(d => d.dateKey === dateKey)
     if (idx >= 0) {
+      hapticLight()
       const nextOffset = hourlyDays.length - 1 - idx
       setDayOffset(nextOffset)
       setSelectedHour(null)
@@ -335,7 +335,7 @@ export function EnergyAnalyticsCard({
           accessibilityState={{ selected: activeTab === 'hourly' }}
         >
           <Text style={[styles.segText, activeTab === 'hourly' && styles.segTextActive]}>
-            每小时柱状图
+            按小时
           </Text>
         </Pressable>
         <Pressable
@@ -345,7 +345,7 @@ export function EnergyAnalyticsCard({
           accessibilityState={{ selected: activeTab === 'daily' }}
         >
           <Text style={[styles.segText, activeTab === 'daily' && styles.segTextActive]}>
-            每日柱状图
+            按日
           </Text>
         </Pressable>
         <Pressable
@@ -355,7 +355,7 @@ export function EnergyAnalyticsCard({
           accessibilityState={{ selected: activeTab === 'balance' }}
         >
           <Text style={[styles.segText, activeTab === 'balance' && styles.segTextActive]}>
-            余量与预测
+            余量趋势
           </Text>
         </Pressable>
       </View>
@@ -363,13 +363,12 @@ export function EnergyAnalyticsCard({
       {/* ==================== 视图 1：24 小时分时用电柱状图 ==================== */}
       {activeTab === 'hourly' && currentDay ? (
         <View>
-          {/* Apple Health 风格 Scrubbing Callout 与日期翻页器 */}
           <View style={styles.calloutRow}>
             <View style={styles.calloutLeft}>
               <Text style={styles.calloutLabel}>
                 {selectedHourBucket
-                  ? `${currentDay.shortLabel} ${selectedHourBucket.rangeLabel} 耗电`
-                  : `${currentDay.label} 累计耗电`}
+                  ? `${currentDay.shortLabel} ${selectedHourBucket.rangeLabel}`
+                  : currentDay.label}
               </Text>
               <View style={styles.calloutValueRow}>
                 <Text style={styles.calloutValue}>
@@ -380,61 +379,68 @@ export function EnergyAnalyticsCard({
                 </Text>
                 <Text style={styles.calloutUnit}>度</Text>
               </View>
-              <Text style={styles.calloutSub}>
-                {selectedHourBucket
-                  ? (selectedHourBucket.hasSample ? '点击柱体可取消选中' : '该小时段暂无采样变化')
-                  : (currentDay.peakHour !== null
-                    ? `当日峰值 ${pad2(currentDay.peakHour)}:00 (${formatNumberCompact(currentDay.peakKwh, 2)}度) · 点击柱体检视`
-                    : '点击下方柱体查看单小时耗电')}
-              </Text>
             </View>
 
-            {/* 左右翻日控件 */}
-            <View style={styles.dayPager}>
-              <Pressable
-                onPress={() => {
-                  setDayOffset(prev => Math.min(maxDayOffset, prev + 1))
-                  setSelectedHour(null)
-                }}
-                disabled={clampedOffset >= maxDayOffset}
-                style={({ pressed }) => [
-                  styles.pagerBtn,
-                  pressed && styles.pressed,
-                  clampedOffset >= maxDayOffset && styles.disabled
-                ]}
-                accessibilityRole="button"
-                accessibilityLabel="前一天"
-              >
-                <Text style={styles.pagerBtnText}>‹</Text>
-              </Pressable>
-              <Text style={styles.pagerDateText}>{currentDay.shortLabel}</Text>
-              <Pressable
-                onPress={() => {
-                  setDayOffset(prev => Math.max(0, prev - 1))
-                  setSelectedHour(null)
-                }}
-                disabled={clampedOffset <= 0}
-                style={({ pressed }) => [
-                  styles.pagerBtn,
-                  pressed && styles.pressed,
-                  clampedOffset <= 0 && styles.disabled
-                ]}
-                accessibilityRole="button"
-                accessibilityLabel="后一天"
-              >
-                <Text style={styles.pagerBtnText}>›</Text>
-              </Pressable>
+            <View style={styles.rightControls}>
+              {showDemoToggle && onToggleDemo ? (
+                <Pressable
+                  onPress={() => {
+                    hapticLight()
+                    onToggleDemo()
+                  }}
+                  style={[styles.demoChip, demoActive && styles.demoChipActive]}
+                >
+                  <Text style={[styles.demoChipText, demoActive && styles.demoChipTextActive]}>
+                    {demoActive ? '切回实测' : '预览示例'}
+                  </Text>
+                </Pressable>
+              ) : null}
+
+              <View style={styles.dayPager}>
+                <Pressable
+                  onPress={() => {
+                    hapticTick()
+                    setDayOffset(prev => Math.min(maxDayOffset, prev + 1))
+                    setSelectedHour(null)
+                  }}
+                  disabled={clampedOffset >= maxDayOffset}
+                  style={({ pressed }) => [
+                    styles.pagerBtn,
+                    pressed && styles.pressed,
+                    clampedOffset >= maxDayOffset && styles.disabled
+                  ]}
+                  accessibilityRole="button"
+                  accessibilityLabel="前一天"
+                >
+                  <Text style={styles.pagerBtnText}>‹</Text>
+                </Pressable>
+                <Text style={styles.pagerDateText}>{currentDay.shortLabel}</Text>
+                <Pressable
+                  onPress={() => {
+                    hapticTick()
+                    setDayOffset(prev => Math.max(0, prev - 1))
+                    setSelectedHour(null)
+                  }}
+                  disabled={clampedOffset <= 0}
+                  style={({ pressed }) => [
+                    styles.pagerBtn,
+                    pressed && styles.pressed,
+                    clampedOffset <= 0 && styles.disabled
+                  ]}
+                  accessibilityRole="button"
+                  accessibilityLabel="后一天"
+                >
+                  <Text style={styles.pagerBtnText}>›</Text>
+                </Pressable>
+              </View>
             </View>
           </View>
 
-          {/* 24 小时柱状图主体（iOS 设置 -> 电池风格） */}
           <View style={styles.hourlyChartWrap}>
             <View style={styles.hourlyBarsArea}>
-              {/* 横向参考线 */}
               <View style={[styles.hGridLine, { top: '25%' }]} pointerEvents="none" />
               <View style={[styles.hGridLine, { top: '62%' }]} pointerEvents="none" />
 
-              {/* 00 / 06 / 12 / 18 纵向虚线分割 */}
               <View style={[styles.vGridLine, { left: '0%' }]} pointerEvents="none" />
               <View style={[styles.vGridLine, { left: '25%' }]} pointerEvents="none" />
               <View style={[styles.vGridLine, { left: '50%' }]} pointerEvents="none" />
@@ -452,7 +458,10 @@ export function EnergyAnalyticsCard({
                   return (
                     <Pressable
                       key={`h-${bucket.hour}`}
-                      onPress={() => setSelectedHour(prev => (prev === bucket.hour ? null : bucket.hour))}
+                      onPress={() => {
+                        hapticTick()
+                        setSelectedHour(prev => (prev === bucket.hour ? null : bucket.hour))
+                      }}
                       style={styles.barSlot24}
                       accessibilityRole="button"
                       accessibilityLabel={`${bucket.rangeLabel} 耗电 ${bucket.kwh} 度`}
@@ -486,7 +495,6 @@ export function EnergyAnalyticsCard({
               </View>
             </View>
 
-            {/* 右侧 Y 轴刻度 */}
             <View style={styles.rightYAxis}>
               <Text style={styles.yAxisText}>{formatNumberCompact(hourlyMax, 1)}度</Text>
               <Text style={styles.yAxisText}>{formatNumberCompact(hourlyMax / 2, 1)}度</Text>
@@ -502,7 +510,7 @@ export function EnergyAnalyticsCard({
           <View style={styles.calloutRow}>
             <View style={styles.calloutLeft}>
               <Text style={styles.calloutLabel}>
-                {selectedDailyBar ? `${selectedDailyBar.label} 总耗电` : '近期日均耗电量'}
+                {selectedDailyBar ? selectedDailyBar.label : '日均耗电'}
               </Text>
               <View style={styles.calloutValueRow}>
                 <Text style={styles.calloutValue}>
@@ -510,15 +518,8 @@ export function EnergyAnalyticsCard({
                     ? formatNumberCompact(selectedDailyBar.kwh, 2)
                     : (dailyAverage !== null ? formatNumberCompact(dailyAverage, 1) : '--')}
                 </Text>
-                <Text style={styles.calloutUnit}>度/天</Text>
+                <Text style={styles.calloutUnit}>度</Text>
               </View>
-              <Text style={styles.calloutSub}>
-                {selectedDailyBar
-                  ? (dailyAverage !== null
-                    ? `较日均${selectedDailyBar.kwh >= dailyAverage ? '偏高' : '偏低'} ${formatNumberCompact(Math.abs(selectedDailyBar.kwh - dailyAverage), 1)} 度`
-                    : '点击右侧按钮可穿透查看当日 24 小时明细')
-                  : '虚线为日均耗电基准线 · 点击单日柱体检视'}
-              </Text>
             </View>
 
             {selectedDailyBar ? (
@@ -528,7 +529,7 @@ export function EnergyAnalyticsCard({
                 accessibilityRole="button"
                 accessibilityLabel="查看当日24小时分时图"
               >
-                <Text style={styles.drillDownText}>当日24h分时 ›</Text>
+                <Text style={styles.drillDownText}>分时明细 ›</Text>
               </Pressable>
             ) : null}
           </View>
@@ -538,7 +539,6 @@ export function EnergyAnalyticsCard({
               <View style={[styles.hGridLine, { top: '25%' }]} pointerEvents="none" />
               <View style={[styles.hGridLine, { top: '62%' }]} pointerEvents="none" />
 
-              {/* 日均耗电参考线 */}
               {dailyAverage !== null && dailyMax > 0 ? (
                 <View
                   pointerEvents="none"
@@ -563,7 +563,10 @@ export function EnergyAnalyticsCard({
                   return (
                     <Pressable
                       key={bar.dateKey}
-                      onPress={() => setSelectedDailyIndex(prev => (prev === index ? null : index))}
+                      onPress={() => {
+                        hapticTick()
+                        setSelectedDailyIndex(prev => (prev === index ? null : index))
+                      }}
                       style={styles.dailySlot}
                       accessibilityRole="button"
                       accessibilityLabel={`${bar.shortLabel} 耗电 ${bar.kwh} 度`}
@@ -616,8 +619,8 @@ export function EnergyAnalyticsCard({
             <View style={styles.calloutLeft}>
               <Text style={styles.calloutLabel}>
                 {selectedBalancePoint
-                  ? `采样时间 ${formatUpdatedAt(selectedBalancePoint.createdAt)}`
-                  : '剩余电量与未来 36h 预测'}
+                  ? formatUpdatedAt(selectedBalancePoint.createdAt)
+                  : '剩余电量'}
               </Text>
               <View style={styles.calloutValueRow}>
                 <Text style={styles.calloutValue}>
@@ -626,29 +629,29 @@ export function EnergyAnalyticsCard({
                 <Text style={styles.calloutUnit}>度</Text>
                 {selectedBalancePoint?.recharged ? (
                   <View style={styles.rechargeBadge}>
-                    <Text style={styles.rechargeBadgeText}>充电跳变</Text>
+                    <Text style={styles.rechargeBadgeText}>已充电</Text>
                   </View>
                 ) : null}
               </View>
-              <Text style={styles.calloutSub}>
-                实线为历史余量 · 蓝点为未来36h耗尽预测 · 红线为提醒阈值
-              </Text>
             </View>
 
             {points.length > 2 ? (
               <Pressable
-                onPress={() => setDetailModalVisible(true)}
+                onPress={() => {
+                  hapticLight()
+                  setDetailModalVisible(true)
+                }}
                 style={({ pressed }) => [styles.drillDownChip, pressed && styles.pressed]}
                 accessibilityRole="button"
                 accessibilityLabel="打开全屏长历史趋势图"
               >
-                <Text style={styles.drillDownText}>全屏长历史 ›</Text>
+                <Text style={styles.drillDownText}>全屏 ›</Text>
               </Pressable>
             ) : null}
           </View>
 
           {previewBalancePoints.length === 0 ? (
-            <Text style={styles.emptyText}>暂无历史电量采样点</Text>
+            <Text style={styles.emptyText}>暂无历史记录</Text>
           ) : (
             <BalanceLineCanvas
               fluid
@@ -668,7 +671,6 @@ export function EnergyAnalyticsCard({
         </View>
       ) : null}
 
-      {/* 全屏可横滑 14 天长历史曲线 Modal */}
       <Modal
         animationType="slide"
         visible={detailModalVisible}
@@ -677,12 +679,12 @@ export function EnergyAnalyticsCard({
       >
         <View style={styles.modalScreen}>
           <View style={styles.modalHeader}>
-            <View>
-              <Text style={styles.modalTitle}>14 天完整电量曲线</Text>
-              <Text style={styles.modalSubtitle}>左右滑动检视全部整点快照与充电跳变记录</Text>
-            </View>
+            <Text style={styles.modalTitle}>14 天电量曲线</Text>
             <Pressable
-              onPress={() => setDetailModalVisible(false)}
+              onPress={() => {
+                hapticLight()
+                setDetailModalVisible(false)
+              }}
               style={({ pressed }) => [styles.modalCloseBtn, pressed && styles.pressed]}
               accessibilityRole="button"
               accessibilityLabel="关闭全屏趋势图"
@@ -753,7 +755,7 @@ const styles = StyleSheet.create({
   },
   calloutRow: {
     flexDirection: 'row',
-    alignItems: 'flex-start',
+    alignItems: 'center',
     justifyContent: 'space-between',
     marginBottom: spacing.md,
     gap: spacing.sm
@@ -763,8 +765,9 @@ const styles = StyleSheet.create({
   },
   calloutLabel: {
     color: colors.textMuted,
-    fontSize: 11,
-    fontWeight: '600'
+    fontSize: 12,
+    fontWeight: '500',
+    fontVariant: ['tabular-nums']
   },
   calloutValueRow: {
     flexDirection: 'row',
@@ -784,11 +787,27 @@ const styles = StyleSheet.create({
     fontSize: 13,
     fontWeight: '600'
   },
-  calloutSub: {
-    marginTop: 2,
-    color: colors.textMuted,
+  rightControls: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8
+  },
+  demoChip: {
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: radii.pill,
+    backgroundColor: colors.iosBlueSurface
+  },
+  demoChipActive: {
+    backgroundColor: colors.iosAmberSurface
+  },
+  demoChipText: {
+    color: colors.iosBlue,
     fontSize: 11,
-    fontVariant: ['tabular-nums']
+    fontWeight: '600'
+  },
+  demoChipTextActive: {
+    color: colors.iosAmberDark
   },
   dayPager: {
     flexDirection: 'row',
@@ -800,12 +819,11 @@ const styles = StyleSheet.create({
     gap: 4
   },
   pagerBtn: {
-    width: 26,
-    height: 26,
-    borderRadius: radii.pill,
+    width: 24,
+    height: 24,
+    borderRadius: 12,
     alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: colors.surface
+    justifyContent: 'center'
   },
   pagerBtnText: {
     color: colors.text,
@@ -815,34 +833,45 @@ const styles = StyleSheet.create({
   },
   pagerDateText: {
     color: colors.text,
-    fontSize: 12,
+    fontSize: 11,
     fontWeight: '600',
-    paddingHorizontal: 4,
+    paddingHorizontal: 2,
     fontVariant: ['tabular-nums']
   },
   drillDownChip: {
     paddingHorizontal: 10,
-    paddingVertical: 6,
+    paddingVertical: 5,
     borderRadius: radii.pill,
     backgroundColor: colors.iosBlueSurface
   },
   drillDownText: {
     color: colors.iosBlue,
-    fontSize: 12,
+    fontSize: 11,
+    fontWeight: '600'
+  },
+  rechargeBadge: {
+    marginLeft: 6,
+    paddingHorizontal: 7,
+    paddingVertical: 2,
+    borderRadius: radii.pill,
+    backgroundColor: colors.iosAmberSurface
+  },
+  rechargeBadgeText: {
+    color: colors.iosAmberDark,
+    fontSize: 10,
     fontWeight: '600'
   },
   hourlyChartWrap: {
     flexDirection: 'row',
-    alignItems: 'stretch',
-    height: CHART_HEIGHT
+    height: CHART_HEIGHT,
+    alignItems: 'stretch'
   },
   hourlyBarsArea: {
     flex: 1,
     position: 'relative',
-    borderTopWidth: hairlineWidth,
+    paddingBottom: 22,
     borderBottomWidth: hairlineWidth,
-    borderColor: colors.separator,
-    paddingBottom: 22
+    borderBottomColor: colors.separator
   },
   hGridLine: {
     position: 'absolute',
@@ -862,27 +891,29 @@ const styles = StyleSheet.create({
     flex: 1,
     flexDirection: 'row',
     alignItems: 'flex-end',
-    paddingTop: 10,
     paddingHorizontal: 2,
-    gap: 2.5
+    gap: 3
   },
   barSlot24: {
     flex: 1,
     height: '100%',
-    justifyContent: 'flex-end'
+    justifyContent: 'flex-end',
+    alignItems: 'center'
   },
   barColumn24: {
     width: '100%',
     borderTopLeftRadius: 2.5,
-    borderTopRightRadius: 2.5
+    borderTopRightRadius: 2.5,
+    minHeight: 2
   },
   xAxisRow24: {
     position: 'absolute',
-    left: 2,
-    right: 2,
-    bottom: 3,
+    left: 0,
+    right: 0,
+    bottom: 2,
     flexDirection: 'row',
-    justifyContent: 'space-between'
+    justifyContent: 'space-between',
+    paddingRight: '18%'
   },
   xAxisTick: {
     color: colors.textFaint,
@@ -890,11 +921,10 @@ const styles = StyleSheet.create({
     fontVariant: ['tabular-nums']
   },
   rightYAxis: {
-    width: 42,
-    justifyContent: 'space-between',
-    alignItems: 'flex-end',
+    width: 38,
     paddingBottom: 22,
-    paddingLeft: 6
+    justifyContent: 'space-between',
+    alignItems: 'flex-end'
   },
   yAxisText: {
     color: colors.textFaint,
@@ -905,9 +935,8 @@ const styles = StyleSheet.create({
     flex: 1,
     flexDirection: 'row',
     alignItems: 'flex-end',
-    paddingTop: 10,
     paddingHorizontal: 4,
-    gap: 6
+    gap: 8
   },
   dailySlot: {
     flex: 1,
@@ -923,13 +952,12 @@ const styles = StyleSheet.create({
   },
   dailyBarCol: {
     width: '78%',
-    maxWidth: 18,
-    borderTopLeftRadius: 4,
-    borderTopRightRadius: 4
+    borderTopLeftRadius: 5,
+    borderTopRightRadius: 5,
+    minHeight: 3
   },
   dailyXLabel: {
-    position: 'absolute',
-    bottom: -19,
+    marginTop: 5,
     color: colors.textFaint,
     fontSize: 10,
     fontVariant: ['tabular-nums']
@@ -945,18 +973,20 @@ const styles = StyleSheet.create({
     borderTopWidth: 1,
     borderStyle: 'dashed',
     borderColor: colors.iosAmber,
-    zIndex: 2
+    zIndex: 5
   },
   avgReferenceTag: {
     position: 'absolute',
     right: 4,
     top: -15,
-    backgroundColor: 'rgba(255, 255, 255, 0.9)',
-    paddingHorizontal: 4,
+    paddingHorizontal: 5,
+    paddingVertical: 1,
     borderRadius: 4,
+    backgroundColor: colors.iosAmberSurface,
     color: colors.iosAmberDark,
     fontSize: 9,
-    fontWeight: '600'
+    fontWeight: '600',
+    fontVariant: ['tabular-nums']
   },
   lineCanvas: {
     position: 'relative',
@@ -967,31 +997,12 @@ const styles = StyleSheet.create({
   lineCanvasFluid: {
     width: '100%'
   },
-  thresholdLine: {
-    position: 'absolute',
-    left: CHART_PADDING,
-    right: CHART_PADDING,
-    borderTopWidth: 1,
-    borderStyle: 'dashed',
-    borderColor: colors.iosRed
-  },
-  thresholdLineTag: {
-    position: 'absolute',
-    left: 4,
-    top: -15,
-    color: colors.iosRed,
-    fontSize: 9,
-    fontWeight: '600',
-    backgroundColor: 'rgba(255,255,255,0.85)',
-    paddingHorizontal: 4,
-    borderRadius: 4
-  },
   lineSegment: {
     position: 'absolute',
     height: 2.5,
     borderRadius: radii.pill,
-    transformOrigin: 'left center',
-    backgroundColor: colors.iosBlue
+    backgroundColor: colors.iosBlue,
+    transformOrigin: 'left center'
   },
   rechargeSegment: {
     backgroundColor: colors.iosAmber
@@ -1000,8 +1011,29 @@ const styles = StyleSheet.create({
     position: 'absolute',
     height: 2,
     borderRadius: radii.pill,
-    transformOrigin: 'left center',
-    backgroundColor: 'rgba(0, 122, 255, 0.35)'
+    backgroundColor: colors.iosTeal,
+    opacity: 0.55,
+    transformOrigin: 'left center'
+  },
+  thresholdLine: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    borderTopWidth: 1,
+    borderStyle: 'dashed',
+    borderColor: colors.iosRed
+  },
+  thresholdLineTag: {
+    position: 'absolute',
+    left: 8,
+    top: -15,
+    paddingHorizontal: 5,
+    paddingVertical: 1,
+    borderRadius: 4,
+    backgroundColor: colors.iosRedSurface,
+    color: colors.iosRedDark,
+    fontSize: 9,
+    fontWeight: '600'
   },
   pointHitBox: {
     position: 'absolute',
@@ -1013,26 +1045,20 @@ const styles = StyleSheet.create({
   pointDot: {
     width: 8,
     height: 8,
-    borderRadius: radii.pill
+    borderRadius: radii.pill,
+    borderWidth: 1.5,
+    borderColor: colors.surface
   },
   currentDot: {
-    backgroundColor: colors.iosBlue,
-    borderWidth: 2,
-    borderColor: colors.surface
+    backgroundColor: colors.iosBlue
   },
   selectedDot: {
     width: 10,
     height: 10,
-    backgroundColor: colors.text,
-    borderWidth: 2,
-    borderColor: colors.surface
+    backgroundColor: colors.text
   },
   rechargeDot: {
-    width: 9,
-    height: 9,
-    backgroundColor: colors.surface,
-    borderWidth: 2,
-    borderColor: colors.iosAmber
+    backgroundColor: colors.iosAmber
   },
   canvasYLabel: {
     position: 'absolute',
@@ -1041,23 +1067,11 @@ const styles = StyleSheet.create({
     fontSize: 10,
     fontVariant: ['tabular-nums']
   },
-  rechargeBadge: {
-    marginLeft: 6,
-    paddingHorizontal: 6,
-    paddingVertical: 2,
-    borderRadius: 5,
-    backgroundColor: colors.iosAmberSurface
-  },
-  rechargeBadgeText: {
-    color: colors.iosAmberDark,
-    fontSize: 10,
-    fontWeight: '600'
-  },
   emptyText: {
-    paddingVertical: 44,
-    textAlign: 'center',
     color: colors.textMuted,
-    fontSize: 13
+    fontSize: 13,
+    paddingVertical: spacing.lg,
+    textAlign: 'center'
   },
   modalScreen: {
     flex: 1,
@@ -1069,22 +1083,16 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    marginBottom: spacing.xl
+    marginBottom: spacing.lg
   },
   modalTitle: {
     color: colors.text,
-    fontSize: 22,
-    fontWeight: '700',
-    letterSpacing: -0.5
-  },
-  modalSubtitle: {
-    marginTop: 2,
-    color: colors.textMuted,
-    fontSize: 12
+    fontSize: 20,
+    fontWeight: '700'
   },
   modalCloseBtn: {
     paddingHorizontal: 14,
-    paddingVertical: 7,
+    paddingVertical: 8,
     borderRadius: radii.pill,
     backgroundColor: colors.surface
   },

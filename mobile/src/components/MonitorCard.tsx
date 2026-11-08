@@ -1,7 +1,6 @@
 import { Pressable, StyleSheet, Text, View } from 'react-native'
 
 import { cardShadow, colors, hairlineWidth, radii, spacing } from '../theme'
-import { formatUpdatedAt } from '../utils/power'
 
 interface MonitorCardProps {
   threshold: number
@@ -58,8 +57,6 @@ export function MonitorCard({
   threshold,
   enabled,
   ongoingEnabled,
-  thresholdEtaLabel,
-  lastCheckedAt,
   busy = false,
   testingNotification = false,
   feedbackMessage = null,
@@ -70,36 +67,20 @@ export function MonitorCard({
   onTestNotification,
   onOpenBatterySettings
 }: MonitorCardProps) {
-  const formattedLastCheck = lastCheckedAt ? formatUpdatedAt(lastCheckedAt) : ''
-
   return (
     <View style={styles.card}>
-      {/* 卡片顶部标题与运行状态胶囊 */}
       <View style={styles.header}>
-        <View style={styles.headerTextWrap}>
-          <Text style={styles.title}>通知与后台守护</Text>
-          <Text style={styles.subtitle}>
-            {formattedLastCheck
-              ? `上次巡检于 ${formattedLastCheck}`
-              : '结合本地定时巡检、系统级预测闹钟与常驻通知栏三重守护'}
-          </Text>
-        </View>
+        <Text style={styles.title}>电量提醒</Text>
         <View style={[styles.statusPill, enabled ? styles.statusOn : styles.statusOff]}>
           <View style={[styles.statusDot, enabled ? styles.statusDotOn : styles.statusDotOff]} />
           <Text style={[styles.statusText, enabled ? styles.statusTextOn : styles.statusTextOff]}>
-            {enabled ? '守护中' : '未开启'}
+            {enabled ? '已开启' : '未开启'}
           </Text>
         </View>
       </View>
 
-      {/* 行 1：低电量提醒主开关 */}
       <View style={styles.listRow}>
-        <View style={styles.rowTextBlock}>
-          <Text style={styles.rowTitle}>低电量通知提醒</Text>
-          <Text style={styles.rowDesc}>
-            低于 {threshold} 度时立即弹窗提醒，并注册系统预测闹钟
-          </Text>
-        </View>
+        <Text style={styles.rowTitle}>低电量通知</Text>
         <IosSwitch
           value={enabled}
           disabled={busy}
@@ -108,12 +89,8 @@ export function MonitorCard({
         />
       </View>
 
-      {/* 行 2：提醒阈值步进调节 */}
       <View style={styles.listRow}>
-        <View style={styles.rowTextBlock}>
-          <Text style={styles.rowTitle}>预警阈值</Text>
-          <Text style={styles.rowDesc}>{thresholdEtaLabel || '可设置 5 – 40 度'}</Text>
-        </View>
+        <Text style={styles.rowTitle}>提醒阈值</Text>
         <View style={styles.stepper}>
           <Pressable
             onPress={() => onThresholdChange(threshold - 1)}
@@ -145,39 +122,26 @@ export function MonitorCard({
         </View>
       </View>
 
-      {/* 行 3：常驻通知栏电量卡片开关 */}
       <View style={styles.listRow}>
-        <View style={styles.rowTextBlock}>
-          <Text style={styles.rowTitle}>常驻通知栏电量卡片</Text>
-          <Text style={styles.rowDesc}>
-            下拉通知栏实时查看度数，防止系统清理后台进程
-          </Text>
-        </View>
+        <Text style={styles.rowTitle}>通知栏常驻电量</Text>
         <IosSwitch
           value={enabled && ongoingEnabled}
           disabled={busy || !enabled}
           onPress={onToggleOngoing}
-          label="切换常驻通知栏电量卡片"
+          label="切换通知栏常驻电量"
         />
       </View>
 
-      {/* 行 4：后台电池优化白名单 */}
       <Pressable
         onPress={onOpenBatterySettings}
         style={({ pressed }) => [styles.listRow, pressed && styles.pressed]}
         accessibilityRole="button"
-        accessibilityLabel="打开系统电池优化白名单设置"
+        accessibilityLabel="后台省电白名单"
       >
-        <View style={styles.rowTextBlock}>
-          <Text style={styles.rowTitle}>后台无限制运行权限</Text>
-          <Text style={styles.rowDesc}>
-            建议在系统电池设置中设为「无限制 / 忽略电池优化」
-          </Text>
-        </View>
-        <Text style={styles.actionLinkText}>去设置 ›</Text>
+        <Text style={styles.rowTitle}>后台省电白名单</Text>
+        <Text style={styles.actionLinkText}>设置 ›</Text>
       </Pressable>
 
-      {/* 行 5：立即发送测试通知 */}
       <Pressable
         onPress={onTestNotification}
         disabled={testingNotification}
@@ -188,16 +152,11 @@ export function MonitorCard({
           testingNotification && styles.disabled
         ]}
         accessibilityRole="button"
-        accessibilityLabel="立即发送测试通知"
+        accessibilityLabel="发送测试通知"
       >
-        <View style={styles.rowTextBlock}>
-          <Text style={styles.rowTitle}>通知通道自检</Text>
-          <Text style={styles.rowDesc}>
-            发送一条立即弹窗的测试通知以验证权限是否生效
-          </Text>
-        </View>
+        <Text style={styles.rowTitle}>测试通知</Text>
         <Text style={styles.actionLinkText}>
-          {testingNotification ? '发送中…' : '立即测试 ›'}
+          {testingNotification ? '发送中…' : '发送 ›'}
         </Text>
       </Pressable>
 
@@ -211,24 +170,19 @@ const styles = StyleSheet.create({
   card: {
     marginBottom: spacing.md,
     paddingHorizontal: spacing.xl,
-    paddingTop: spacing.xl,
-    paddingBottom: spacing.md,
+    paddingTop: spacing.lg,
+    paddingBottom: spacing.sm,
     borderRadius: radii.card,
     backgroundColor: colors.surface,
     ...cardShadow
   },
   header: {
     flexDirection: 'row',
-    alignItems: 'flex-start',
+    alignItems: 'center',
     justifyContent: 'space-between',
-    gap: spacing.md,
-    paddingBottom: spacing.md,
+    paddingBottom: spacing.sm,
     borderBottomWidth: hairlineWidth,
     borderBottomColor: colors.separator
-  },
-  headerTextWrap: {
-    flex: 1,
-    flexShrink: 1
   },
   title: {
     color: colors.text,
@@ -236,17 +190,12 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     letterSpacing: -0.3
   },
-  subtitle: {
-    marginTop: 2,
-    color: colors.textMuted,
-    fontSize: 11
-  },
   statusPill: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 6,
-    paddingHorizontal: 10,
-    paddingVertical: 5,
+    gap: 5,
+    paddingHorizontal: 9,
+    paddingVertical: 4,
     borderRadius: radii.pill
   },
   statusOn: {
@@ -280,28 +229,19 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingVertical: 13,
+    minHeight: 46,
+    paddingVertical: 8,
     borderBottomWidth: hairlineWidth,
     borderBottomColor: colors.separator,
     gap: spacing.md
   },
   lastRow: {
-    borderBottomWidth: 0,
-    paddingBottom: 6
-  },
-  rowTextBlock: {
-    flex: 1
+    borderBottomWidth: 0
   },
   rowTitle: {
     color: colors.text,
-    fontSize: 14,
-    fontWeight: '600'
-  },
-  rowDesc: {
-    marginTop: 2,
-    color: colors.textMuted,
-    fontSize: 11,
-    fontVariant: ['tabular-nums']
+    fontSize: 15,
+    fontWeight: '500'
   },
   switchTrack: {
     width: 48,
@@ -336,46 +276,46 @@ const styles = StyleSheet.create({
   stepper: {
     flexDirection: 'row',
     alignItems: 'center',
-    borderRadius: 10,
+    borderRadius: 9,
     backgroundColor: colors.control
   },
   stepButton: {
-    width: 34,
-    height: 34,
+    width: 32,
+    height: 32,
     alignItems: 'center',
     justifyContent: 'center'
   },
   stepText: {
     color: colors.text,
-    fontSize: 19,
+    fontSize: 18,
     fontWeight: '500'
   },
   thresholdValue: {
-    minWidth: 50,
+    minWidth: 46,
     color: colors.text,
     fontSize: 14,
-    fontWeight: '700',
+    fontWeight: '600',
     textAlign: 'center',
     fontVariant: ['tabular-nums']
   },
   actionLinkText: {
     color: colors.iosBlue,
-    fontSize: 13,
-    fontWeight: '600'
+    fontSize: 14,
+    fontWeight: '500'
   },
   feedbackText: {
-    marginTop: spacing.sm,
+    marginTop: spacing.xs,
+    marginBottom: spacing.xs,
     color: colors.iosGreenDark,
     fontSize: 12,
-    textAlign: 'center',
-    fontWeight: '500'
+    textAlign: 'center'
   },
   errorText: {
-    marginTop: spacing.sm,
+    marginTop: spacing.xs,
+    marginBottom: spacing.xs,
     color: colors.iosRed,
     fontSize: 12,
-    textAlign: 'center',
-    fontWeight: '500'
+    textAlign: 'center'
   },
   disabled: {
     opacity: 0.45

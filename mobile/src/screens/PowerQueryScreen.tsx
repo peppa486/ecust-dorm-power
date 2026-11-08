@@ -68,6 +68,7 @@ import {
 import { colors, radii, spacing } from '../theme'
 import { getInstalledAppVersion, isUpdateAvailable } from '../update/version'
 import { analyzePowerHistory, buildDemoPowerHistory, type ServerHistoryStats } from '../utils/analytics'
+import { hapticLight, hapticSuccess, hapticTick } from '../utils/haptics'
 import { isValidRoom, normalizeRoomInput } from '../utils/power'
 
 type CampusMap<T> = Record<Campus, T>
@@ -443,6 +444,7 @@ export function PowerQueryScreen() {
 
   const handleCampusChange = useCallback((nextCampus: Campus) => {
     if (nextCampus === campusRef.current || queryLoading) return
+    hapticTick()
 
     const nextSelection = selectionFor(preferencesRef.current, nextCampus)
     updatePreferences({ lastCampus: nextCampus })
@@ -456,6 +458,7 @@ export function PowerQueryScreen() {
   }, [loadBuildings, queryLoading, updatePreferences])
 
   const handleBuildingSelect = useCallback((nextBuilding: BuildingOption) => {
+    hapticTick()
     setSelectedBuilding(nextBuilding.value)
     setQueryError(null)
     setPickerVisible(false)
@@ -742,7 +745,10 @@ export function PowerQueryScreen() {
           hasActiveDashboard ? (
             <RefreshControl
               refreshing={refreshing}
-              onRefresh={() => void runQuery(true)}
+              onRefresh={() => {
+                hapticLight()
+                void runQuery(true)
+              }}
               tintColor={colors.iosBlue}
               colors={[colors.iosBlue]}
             />
@@ -750,26 +756,26 @@ export function PowerQueryScreen() {
         }
       >
         <View style={styles.page}>
-          {/* Apple HIG 大标题顶栏与右侧寝室胶囊切换器 */}
+          {/* Apple HIG 极简大标题顶栏 */}
           <View style={styles.navBar}>
-            <View>
-              <Text style={styles.navTitle}>宿舍电量</Text>
-              <Text style={styles.navSubtitle}>
-                {isMine ? '我的寝室 · 整点自动采样与多维分析' : '华东理工大学电费实时查询'}
-              </Text>
-            </View>
+            <Text style={styles.navTitle}>宿舍电量</Text>
 
-            <Pressable
-              onPress={() => setRoomSheetVisible(true)}
-              style={({ pressed }) => [styles.roomPill, pressed && styles.pressed]}
-              accessibilityRole="button"
-              accessibilityLabel={`当前寝室 ${roomPillLabel}，点击切换`}
-            >
-              <Text style={styles.roomPillText} numberOfLines={1}>
-                {roomPillLabel}
-              </Text>
-              <Text style={styles.roomPillChevron}>▾</Text>
-            </Pressable>
+            {hasActiveDashboard ? (
+              <Pressable
+                onPress={() => {
+                  hapticLight()
+                  setRoomSheetVisible(true)
+                }}
+                style={({ pressed }) => [styles.roomPill, pressed && styles.pressed]}
+                accessibilityRole="button"
+                accessibilityLabel={`当前寝室 ${roomPillLabel}，点击切换`}
+              >
+                <Text style={styles.roomPillText} numberOfLines={1}>
+                  {roomPillLabel}
+                </Text>
+                <Text style={styles.roomPillChevron}>▾</Text>
+              </Pressable>
+            ) : null}
           </View>
 
           {availableUpdate ? (
@@ -785,11 +791,10 @@ export function PowerQueryScreen() {
           {hydrating ? (
             <View style={styles.bootstrapState}>
               <ActivityIndicator color={colors.iosBlue} />
-              <Text style={styles.bootstrapText}>正在同步电量与历史趋势…</Text>
+              <Text style={styles.bootstrapText}>同步中…</Text>
             </View>
           ) : null}
 
-          {/* 首次打开且尚未查询或绑定寝室时，内联显示查询卡片 */}
           {!hydrating && !hasActiveDashboard ? (
             <QueryCard
               campus={campus}
@@ -800,10 +805,16 @@ export function PowerQueryScreen() {
               queryLoading={queryLoading}
               disabled={hydrating || queryLoading}
               onCampusChange={handleCampusChange}
-              onOpenBuildingPicker={() => setPickerVisible(true)}
+              onOpenBuildingPicker={() => {
+                hapticLight()
+                setPickerVisible(true)
+              }}
               onRetryBuildings={() => void loadBuildings(campus, selectedBuilding)}
               onRoomChange={handleRoomChange}
-              onQuery={() => void runQuery(false)}
+              onQuery={() => {
+                hapticLight()
+                void runQuery(false)
+              }}
             />
           ) : null}
 
@@ -817,7 +828,7 @@ export function PowerQueryScreen() {
           ) : null}
 
           {queryLoading && !refreshing ? (
-            <StateCard kind="loading" title="正在查询" message="正在从学校电控系统获取最新度数…" />
+            <StateCard kind="loading" title="查询中" message="" />
           ) : queryError ? (
             <StateCard
               kind="error"
@@ -827,7 +838,6 @@ export function PowerQueryScreen() {
             />
           ) : null}
 
-          {/* 核心数据仪表盘（一旦有查询结果或已绑定我的寝室即展示） */}
           {!hydrating && hasActiveDashboard ? (
             <>
               <HeroTelemetryCard
@@ -837,60 +847,20 @@ export function PowerQueryScreen() {
                 isMine={isMine}
                 busy={monitorBusy}
                 refreshing={refreshing || queryLoading}
-                onRefresh={() => void runQuery(true)}
-                onSetMine={() => void handleSetMine()}
-                onRemoveMine={() => void handleRemoveMine()}
-                onOpenRoomSwitcher={() => setRoomSheetVisible(true)}
+                onRefresh={() => {
+                  hapticLight()
+                  void runQuery(true)
+                }}
+                onSetMine={() => {
+                  hapticSuccess()
+                  void handleSetMine()
+                }}
+                onRemoveMine={() => {
+                  hapticLight()
+                  void handleRemoveMine()
+                }}
               />
 
-              {!isMine ? (
-                <View style={styles.bindBanner}>
-                  <View style={styles.bindBannerTextWrap}>
-                    <Text style={styles.bindBannerTitle}>开启整点采样与分时图表</Text>
-                    <Text style={styles.bindBannerDesc}>
-                      点击上方「设为我的寝室」，即可解锁 24 小时每小时柱状图、14 天对比、7×24 热力图与离线低电量告警。
-                    </Text>
-                  </View>
-                  <Pressable
-                    onPress={() => void handleSetMine()}
-                    disabled={monitorBusy}
-                    style={({ pressed }) => [styles.bindBannerBtn, pressed && styles.pressed]}
-                  >
-                    <Text style={styles.bindBannerBtnText}>立即开启</Text>
-                  </Pressable>
-                </View>
-              ) : realAnalytics.summary.dailyAverage === null || demoPreviewEnabled ? (
-                <View style={[styles.bindBanner, demoPreviewEnabled && styles.demoBannerActive]}>
-                  <View style={styles.bindBannerTextWrap}>
-                    <Text style={[styles.bindBannerTitle, demoPreviewEnabled && styles.demoBannerTitleActive]}>
-                      {demoPreviewEnabled
-                        ? '正在预览 7 × 24h 多维图表效果'
-                        : `整点采样积累中（已采集 ${activeHistoryPoints.length} 次）`}
-                    </Text>
-                    <Text style={styles.bindBannerDesc}>
-                      {demoPreviewEnabled
-                        ? '当前展示以实测余量为基准的 7 天整点样本，供体验分时柱状图、热力矩阵与耗尽预测。'
-                        : '后续每个整点将自动汇入分时图表；您也可以先开启示例样本体验全量图表交互。'}
-                    </Text>
-                  </View>
-                  <Pressable
-                    onPress={() => setDemoPreviewEnabled(prev => !prev)}
-                    style={({ pressed }) => [
-                      styles.bindBannerBtn,
-                      demoPreviewEnabled && styles.demoBannerBtnActive,
-                      pressed && styles.pressed
-                    ]}
-                    accessibilityRole="button"
-                    accessibilityLabel={demoPreviewEnabled ? '切回实测数据' : '预览图表效果'}
-                  >
-                    <Text style={styles.bindBannerBtnText}>
-                      {demoPreviewEnabled ? '切回实测' : '预览效果'}
-                    </Text>
-                  </Pressable>
-                </View>
-              ) : null}
-
-              {/* 多维图表分析舱（24h分时柱状图 / 14天日耗柱状图 / 余量预测折线图） */}
               <EnergyAnalyticsCard
                 points={effectiveHistoryPoints}
                 hourlyDays={analytics.hourlyDays}
@@ -898,9 +868,11 @@ export function PowerQueryScreen() {
                 forecastPoints={analytics.forecastPoints}
                 dailyAverage={analytics.summary.dailyAverage}
                 threshold={preferences.threshold}
+                showDemoToggle={isMine && (realAnalytics.summary.dailyAverage === null || demoPreviewEnabled)}
+                demoActive={demoPreviewEnabled}
+                onToggleDemo={() => setDemoPreviewEnabled(prev => !prev)}
               />
 
-              {/* 四时段占比结构条 + 7×24h 用电密度热力矩阵 */}
               <PatternInsightsCard
                 periods={analytics.periods}
                 heatmap={analytics.heatmap}
@@ -908,7 +880,6 @@ export function PowerQueryScreen() {
                 lastRechargeAmount={analytics.summary.lastRechargeAmount}
               />
 
-              {/* iOS 设置风格低电量通知与后台保活面板 */}
               {isMine ? (
                 <MonitorCard
                   threshold={Math.max(MIN_THRESHOLD, Math.min(MAX_THRESHOLD, preferences.threshold))}
@@ -920,11 +891,26 @@ export function PowerQueryScreen() {
                   testingNotification={testingNotification}
                   feedbackMessage={monitorFeedback}
                   error={monitorError}
-                  onThresholdChange={handleThresholdChange}
-                  onToggle={() => void handleToggleMonitoring()}
-                  onToggleOngoing={handleToggleOngoing}
-                  onTestNotification={() => void handleTestNotification()}
-                  onOpenBatterySettings={() => void openBatteryOptimizationSettings()}
+                  onThresholdChange={val => {
+                    hapticTick()
+                    handleThresholdChange(val)
+                  }}
+                  onToggle={() => {
+                    hapticLight()
+                    void handleToggleMonitoring()
+                  }}
+                  onToggleOngoing={() => {
+                    hapticLight()
+                    handleToggleOngoing()
+                  }}
+                  onTestNotification={() => {
+                    hapticSuccess()
+                    void handleTestNotification()
+                  }}
+                  onOpenBatterySettings={() => {
+                    hapticLight()
+                    void openBatteryOptimizationSettings()
+                  }}
                 />
               ) : null}
             </>
