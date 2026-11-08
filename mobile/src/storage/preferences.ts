@@ -16,6 +16,7 @@ export interface StoredPreferences {
   threshold: number
   monitoringEnabled: boolean
   notificationsEnabled: boolean
+  ongoingNotificationEnabled: boolean
 }
 
 function emptySelection(): RoomSelection {
@@ -41,7 +42,8 @@ export function createDefaultPreferences(): StoredPreferences {
     myRoom: null,
     threshold: 15,
     monitoringEnabled: false,
-    notificationsEnabled: false
+    notificationsEnabled: false,
+    ongoingNotificationEnabled: true
   }
 }
 
@@ -82,16 +84,20 @@ function parsePreferences(value: string | null): StoredPreferences {
     const selections = typeof candidate.selections === 'object' && candidate.selections !== null
       ? candidate.selections as Record<string, unknown>
       : {}
+    const myRoom = readRoom(candidate.myRoom)
     return {
       lastCampus: isCampus(candidate.lastCampus) ? candidate.lastCampus : fallback.lastCampus,
       selections: {
         奉贤: readSelection(selections.奉贤),
         徐汇: readSelection(selections.徐汇)
       },
-      myRoom: readRoom(candidate.myRoom),
+      myRoom,
       threshold: normalizeThreshold(candidate.threshold, fallback.threshold),
-      monitoringEnabled: Boolean(candidate.monitoringEnabled) && Boolean(readRoom(candidate.myRoom)),
-      notificationsEnabled: Boolean(candidate.notificationsEnabled) && Boolean(readRoom(candidate.myRoom))
+      monitoringEnabled: Boolean(candidate.monitoringEnabled) && Boolean(myRoom),
+      notificationsEnabled: Boolean(candidate.notificationsEnabled) && Boolean(myRoom),
+      ongoingNotificationEnabled: candidate.ongoingNotificationEnabled === undefined
+        ? true
+        : Boolean(candidate.ongoingNotificationEnabled)
     }
   } catch {
     return fallback

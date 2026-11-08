@@ -1,7 +1,7 @@
 import { Pressable, StyleSheet, Text, View } from 'react-native'
 
 import type { MobileUpdate } from '../types/api'
-import { colors, radii, spacing } from '../theme'
+import { cardShadow, colors, hairlineWidth, radii, spacing } from '../theme'
 
 interface UpdateCardProps {
   update: MobileUpdate
@@ -16,8 +16,10 @@ export function UpdateCard({ update, busy = false, error = null, onInstall, onDi
     <View style={styles.card}>
       <View style={styles.header}>
         <View style={styles.titleGroup}>
-          <Text style={styles.title}>{update.forceUpdate ? '需要更新' : '发现新版本'}</Text>
-          <Text style={styles.version}>v{update.version}</Text>
+          <Text style={styles.title}>{update.forceUpdate ? '需要更新版本' : '发现新版本'}</Text>
+          <View style={styles.versionPill}>
+            <Text style={styles.version}>v{update.version}</Text>
+          </View>
         </View>
         {!update.forceUpdate ? (
           <Pressable onPress={onDismiss} hitSlop={10} accessibilityRole="button" accessibilityLabel="稍后更新">
@@ -36,7 +38,7 @@ export function UpdateCard({ update, busy = false, error = null, onInstall, onDi
         accessibilityRole="button"
         accessibilityLabel="立即更新"
       >
-        <Text style={styles.actionText}>{busy ? '正在打开' : '立即更新'}</Text>
+        <Text style={styles.actionText}>{busy ? '正在打开下载...' : '立即更新'}</Text>
       </Pressable>
     </View>
   )
@@ -44,12 +46,13 @@ export function UpdateCard({ update, busy = false, error = null, onInstall, onDi
 
 const styles = StyleSheet.create({
   card: {
-    marginBottom: spacing.lg,
-    padding: spacing.xl,
+    marginBottom: spacing.md,
+    padding: spacing.lg,
     borderRadius: radii.card,
-    borderWidth: 1,
-    borderColor: '#f0dec2',
-    backgroundColor: colors.warningSurface
+    borderWidth: hairlineWidth,
+    borderColor: colors.border,
+    backgroundColor: colors.surface,
+    ...cardShadow
   },
   header: {
     flexDirection: 'row',
@@ -58,51 +61,59 @@ const styles = StyleSheet.create({
   },
   titleGroup: {
     flexDirection: 'row',
-    alignItems: 'baseline',
+    alignItems: 'center',
     gap: spacing.sm
   },
   title: {
     color: colors.text,
-    fontSize: 17,
+    fontSize: 16,
     fontWeight: '700'
   },
+  versionPill: {
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderRadius: radii.pill,
+    backgroundColor: colors.iosBlueSurface
+  },
   version: {
-    color: colors.warning,
-    fontSize: 13,
-    fontWeight: '600'
+    color: colors.iosBlue,
+    fontSize: 12,
+    fontWeight: '700',
+    fontVariant: ['tabular-nums']
   },
   dismiss: {
     color: colors.textMuted,
-    fontSize: 13
+    fontSize: 13,
+    fontWeight: '500'
   },
   notes: {
-    marginTop: spacing.md,
+    marginTop: spacing.sm,
     color: colors.textSecondary,
     fontSize: 13,
-    lineHeight: 20
+    lineHeight: 19
   },
   action: {
-    minHeight: 44,
+    minHeight: 42,
     alignItems: 'center',
     justifyContent: 'center',
-    marginTop: spacing.lg,
+    marginTop: spacing.md,
     borderRadius: radii.control,
     backgroundColor: colors.accent
   },
   actionText: {
     color: colors.surface,
     fontSize: 14,
-    fontWeight: '700'
+    fontWeight: '600'
   },
   disabled: {
     opacity: 0.55
   },
   error: {
-    marginTop: spacing.md,
+    marginTop: spacing.sm,
     color: colors.danger,
     fontSize: 12
   },
   pressed: {
-    opacity: 0.7
+    opacity: 0.72
   }
 })

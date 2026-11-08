@@ -1,8 +1,10 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
-  AppState,
   ActivityIndicator,
+  AppState,
   Linking,
+  Pressable,
+  RefreshControl,
   SafeAreaView,
   ScrollView,
   StyleSheet,
@@ -21,17 +23,25 @@ import {
   removeMobileWatch
 } from '../api/client'
 import { BuildingPickerModal } from '../components/BuildingPickerModal'
+import { EnergyAnalyticsCard } from '../components/EnergyAnalyticsCard'
+import { HeroTelemetryCard } from '../components/HeroTelemetryCard'
 import { MonitorCard } from '../components/MonitorCard'
+import { PatternInsightsCard } from '../components/PatternInsightsCard'
 import { QueryCard } from '../components/QueryCard'
-import { ResultCard } from '../components/ResultCard'
+import { RoomSwitcherModal } from '../components/RoomSwitcherModal'
 import { StateCard } from '../components/StateCard'
-import { TrendChart } from '../components/TrendChart'
 import { UpdateCard } from '../components/UpdateCard'
 import {
   getRemotePushToken,
+  loadMonitorRuntimeState,
+  openBatteryOptimizationSettings,
   requestNotificationAccess,
+  resetMonitorAlertLock,
   runMonitorNow,
-  syncHourlyMonitor
+  sendTestNotification,
+  syncHourlyMonitor,
+  syncPredictiveLowPowerAlarm,
+  updateOngoingPowerNotification
 } from '../monitoring/background'
 import { appendHistory, clearHistory, loadHistory, type HistoryPoint } from '../storage/history'
 import { getMobileInstallationToken } from '../storage/mobileIdentity'
@@ -50,12 +60,14 @@ import {
   type BuildingOption,
   type Campus,
   type MobileHistoryPoint,
+  type MobileHistoryResponse,
   type MobileUpdate,
   type PowerResult,
   type QueryPayload
 } from '../types/api'
 import { colors, radii, spacing } from '../theme'
 import { getInstalledAppVersion, isUpdateAvailable } from '../update/version'
+import { analyzePowerHistory, buildDemoPowerHistory, type ServerHistoryStats } from '../utils/analytics'
 import { isValidRoom, normalizeRoomInput } from '../utils/power'
 
 type CampusMap<T> = Record<Campus, T>
@@ -119,12 +131,19 @@ export function PowerQueryScreen() {
   const [buildingsLoading, setBuildingsLoading] = useState<CampusMap<boolean>>(() => createCampusMap(() => false))
   const [buildingsErrors, setBuildingsErrors] = useState<CampusMap<string | null>>(() => createCampusMap(() => null))
   const [queryLoading, setQueryLoading] = useState(false)
+  const [refreshing, setRefreshing] = useState(false)
   const [queryError, setQueryError] = useState<string | null>(null)
   const [result, setResult] = useState<PowerResult | null>(null)
   const [history, setHistory] = useState<HistoryPoint[]>([])
+  const [serverStats, setServerStats] = useState<ServerHistoryStats | null>(null)
+  const [lastCheckedAt, setLastCheckedAt] = useState<string | null>(null)
   const [monitorError, setMonitorError] = useState<string | null>(null)
+  const [monitorFeedback, setMonitorFeedback] = useState<string | null>(null)
   const [monitorBusy, setMonitorBusy] = useState(false)
+  const [testingNotification, setTestingNotification] = useState(false)
   const [pickerVisible, setPickerVisible] = useState(false)
+  const [roomSheetVisible, setRoomSheetVisible] = useState(false)
+  const [demoPreviewEnabled, setDemoPreviewEnabled] = useState(false)
   const [availableUpdate, setAvailableUpdate] = useState<MobileUpdate | null>(null)
   const [updateBusy, setUpdateBusy] = useState(false)
   const [updateError, setUpdateError] = useState<string | null>(null)
@@ -167,6 +186,13 @@ export function PowerQueryScreen() {
     })
   }, [updatePreferences])
 
+  const refreshMonitorMeta = useCallback(async () => {
+    const state = await loadMonitorRuntimeState()
+    if (mountedRef.current) {
+      setLastCheckedAt(state.lastCheckedAt)
+    }
+  }, [])
+
   const checkForUpdate = useCallback(async () => {
     try {
       const latest = await getMobileUpdate()
@@ -183,7 +209,7 @@ export function PowerQueryScreen() {
       }
       if (!latest || !isUpdateAvailable(installed, latest)) setAvailableUpdate(null)
     } catch {
-      // Update checks are best-effort and must never block querying power.
+      // Update checks are best-effort
     }
   }, [])
 
@@ -205,7 +231,7 @@ export function PowerQueryScreen() {
     roomToWatch: QueryPayload,
     nextPreferences: StoredPreferences,
     pushToken?: string
-  ): Promise<HistoryPoint[]> => {
+  ): Promise<MobileHistoryResponse> => {
     const token = mobileTokenRef.current || await getMobileInstallationToken()
     mobileTokenRef.current = token
     await registerMobileWatch(
@@ -215,8 +241,7 @@ export function PowerQueryScreen() {
       nextPreferences.notificationsEnabled,
       pushToken
     )
-    const remoteHistory = await getMobileHistory(token)
-    return asHistoryPoints(remoteHistory.items)
+    return getMobileHistory(token)
   }, [])
 
   const loadBuildings = useCallback(async (targetCampus: Campus, preferredBuilding = '') => {
@@ -260,11 +285,15 @@ export function PowerQueryScreen() {
     async function restore() {
       void checkForUpdate()
       void syncMobileDevice().catch(() => undefined)
+      await refreshMonitorMeta()
+
       const stored = await loadPreferences()
       if (!active || !mountedRef.current) return
 
-      const restoredCampus = stored.lastCampus
-      const restoredSelection = selectionFor(stored, restoredCampus)
+      const restoredCampus = stored.myRoom?.campus || stored.lastCampus
+      const restoredSelection = stored.myRoom
+        ? { building: stored.myRoom.building, room: stored.myRoom.room }
+        : selectionFor(stored, restoredCampus)
       const restoredHistory = await loadHistory(stored.myRoom)
       if (!active || !mountedRef.current) return
 
@@ -280,10 +309,14 @@ export function PowerQueryScreen() {
       if (active && mountedRef.current) setHydrating(false)
 
       if (stored.myRoom) {
-        let serverHistory: HistoryPoint[] = []
+        let serverHistoryPoints: HistoryPoint[] = []
+        let remoteStats: ServerHistoryStats | null = null
         try {
           const pushToken = stored.notificationsEnabled ? await getRemotePushToken() : null
-          serverHistory = await syncServerWatch(stored.myRoom, stored, pushToken || undefined)
+          const remoteData = await syncServerWatch(stored.myRoom, stored, pushToken || undefined)
+          serverHistoryPoints = asHistoryPoints(remoteData.items)
+          remoteStats = remoteData.stats
+          if (active && mountedRef.current) setServerStats(remoteStats)
         } catch {
           if (stored.monitoringEnabled && active && mountedRef.current) {
             setMonitorError('服务器监控暂时未连接，将在下次打开应用时重试')
@@ -295,14 +328,21 @@ export function PowerQueryScreen() {
           if (!active || !mountedRef.current) return
           setResult(initialResult)
           const localHistory = await appendHistory(stored.myRoom, initialResult.kwh, initialResult.updatedAt)
-          setHistory(mergeHistory(serverHistory, localHistory))
+          const merged = mergeHistory(serverHistoryPoints, localHistory)
+          setHistory(merged)
         } catch {
-          if (active && mountedRef.current) setHistory(mergeHistory(serverHistory, restoredHistory))
+          if (active && mountedRef.current) {
+            setHistory(mergeHistory(serverHistoryPoints, restoredHistory))
+          }
         }
       }
 
       try {
         await syncHourlyMonitor(Boolean(stored.myRoom && stored.monitoringEnabled))
+        if (stored.myRoom && stored.monitoringEnabled) {
+          await runMonitorNow().catch(() => undefined)
+          await refreshMonitorMeta()
+        }
       } catch (error) {
         if (active && mountedRef.current) {
           setMonitorError(stored.myRoom ? '本地后台任务不可用，服务器仍会继续记录' : errorMessage(error, '后台监控不可用'))
@@ -315,16 +355,17 @@ export function PowerQueryScreen() {
       active = false
       mountedRef.current = false
     }
-  }, [checkForUpdate, loadBuildings, syncMobileDevice, syncServerWatch])
+  }, [checkForUpdate, loadBuildings, refreshMonitorMeta, syncMobileDevice, syncServerWatch])
 
   useEffect(() => {
     const subscription = AppState.addEventListener('change', nextState => {
       if (nextState !== 'active') return
       void checkForUpdate()
       void syncMobileDevice().catch(() => undefined)
+      void refreshMonitorMeta()
     })
     return () => subscription.remove()
-  }, [checkForUpdate, syncMobileDevice])
+  }, [checkForUpdate, refreshMonitorMeta, syncMobileDevice])
 
   const currentBuildings = buildingsByCampus[campus]
   const currentBuildingsLoading = hydrating || buildingsLoading[campus]
@@ -332,6 +373,73 @@ export function PowerQueryScreen() {
   const building = currentBuildings.find(item => item.value === selectedBuilding)
   const selectedRoom = roomPayload(campus, selectedBuilding, normalizeRoomInput(room))
   const isMine = Boolean(selectedRoom && sameRoom(preferences.myRoom, selectedRoom))
+
+  // 计算全维度用电统计与图表数据
+  const activeHistoryPoints = useMemo(() => {
+    if (isMine) return history
+    if (result) {
+      return [
+        {
+          kwh: result.kwh,
+          createdAt: result.updatedAt || new Date().toISOString(),
+          recharged: false
+        }
+      ]
+    }
+    return []
+  }, [history, isMine, result])
+
+  const effectiveHistoryPoints = useMemo(() => {
+    if (demoPreviewEnabled) {
+      return buildDemoPowerHistory(result?.kwh ?? 27.8)
+    }
+    return activeHistoryPoints
+  }, [activeHistoryPoints, demoPreviewEnabled, result?.kwh])
+
+  const realAnalytics = useMemo(
+    () => analyzePowerHistory(activeHistoryPoints, isMine ? serverStats : null, preferences.threshold),
+    [activeHistoryPoints, isMine, preferences.threshold, serverStats]
+  )
+
+  const analytics = useMemo(
+    () =>
+      demoPreviewEnabled
+        ? analyzePowerHistory(effectiveHistoryPoints, null, preferences.threshold)
+        : realAnalytics,
+    [demoPreviewEnabled, effectiveHistoryPoints, preferences.threshold, realAnalytics]
+  )
+
+  // 当数据或偏好更新时，同步常驻通知栏卡片与系统级预测闹钟（始终基于真实实测数据）
+  useEffect(() => {
+    if (!isMine || !preferences.myRoom || !result) return
+    void updateOngoingPowerNotification({
+      enabled: preferences.monitoringEnabled && preferences.ongoingNotificationEnabled,
+      displayName: result.displayName,
+      kwh: result.kwh,
+      threshold: preferences.threshold,
+      estimatedDays: realAnalytics.summary.estimatedDays,
+      dailyAverage: realAnalytics.summary.dailyAverage,
+      updatedAt: result.updatedAt
+    }).catch(() => undefined)
+
+    void syncPredictiveLowPowerAlarm({
+      enabled: preferences.monitoringEnabled && preferences.notificationsEnabled,
+      displayName: result.displayName,
+      currentKwh: result.kwh,
+      threshold: preferences.threshold,
+      dailyAverage: realAnalytics.summary.dailyAverage
+    }).catch(() => undefined)
+  }, [
+    realAnalytics.summary.dailyAverage,
+    realAnalytics.summary.estimatedDays,
+    isMine,
+    preferences.monitoringEnabled,
+    preferences.myRoom,
+    preferences.notificationsEnabled,
+    preferences.ongoingNotificationEnabled,
+    preferences.threshold,
+    result
+  ])
 
   const handleCampusChange = useCallback((nextCampus: Campus) => {
     if (nextCampus === campusRef.current || queryLoading) return
@@ -342,7 +450,6 @@ export function PowerQueryScreen() {
     setCampus(nextCampus)
     setSelectedBuilding(nextSelection.building)
     setRoom(nextSelection.room)
-    setResult(null)
     setQueryError(null)
     setPickerVisible(false)
     void loadBuildings(nextCampus, nextSelection.building)
@@ -350,7 +457,6 @@ export function PowerQueryScreen() {
 
   const handleBuildingSelect = useCallback((nextBuilding: BuildingOption) => {
     setSelectedBuilding(nextBuilding.value)
-    setResult(null)
     setQueryError(null)
     setPickerVisible(false)
     updateSelection(campusRef.current, {
@@ -362,7 +468,6 @@ export function PowerQueryScreen() {
   const handleRoomChange = useCallback((value: string) => {
     const nextRoom = normalizeRoomInput(value)
     setRoom(nextRoom)
-    setResult(null)
     setQueryError(null)
     updateSelection(campusRef.current, {
       building: selectedBuilding,
@@ -370,7 +475,7 @@ export function PowerQueryScreen() {
     })
   }, [selectedBuilding, updateSelection])
 
-  const runQuery = useCallback(async () => {
+  const runQuery = useCallback(async (fromRefresh = false) => {
     const normalizedRoom = normalizeRoomInput(room)
     if (!selectedBuilding) {
       setQueryError('请先选择楼栋')
@@ -388,18 +493,32 @@ export function PowerQueryScreen() {
     }
     setRoom(normalizedRoom)
     updateSelection(campus, { building: selectedBuilding, room: normalizedRoom })
-    setQueryLoading(true)
+    if (fromRefresh) setRefreshing(true)
+    else setQueryLoading(true)
     setQueryError(null)
-    setResult(null)
 
     try {
       const data = await queryPower(payload)
       if (!mountedRef.current) return
       setResult(data)
+      setRoomSheetVisible(false)
+
       if (sameRoom(preferencesRef.current.myRoom, payload)) {
         try {
           const localHistory = await appendHistory(payload, data.kwh, data.updatedAt)
-          setHistory(current => mergeHistory(current, localHistory))
+          const token = mobileTokenRef.current || await getMobileInstallationToken()
+          mobileTokenRef.current = token
+          const remoteData = await getMobileHistory(token).catch(() => null)
+          if (remoteData && mountedRef.current) {
+            setServerStats(remoteData.stats)
+            setHistory(mergeHistory(asHistoryPoints(remoteData.items), localHistory))
+          } else if (mountedRef.current) {
+            setHistory(current => mergeHistory(current, localHistory))
+          }
+          if (preferencesRef.current.monitoringEnabled) {
+            await runMonitorNow().catch(() => undefined)
+            await refreshMonitorMeta()
+          }
         } catch {
           setMonitorError('趋势数据保存失败')
         }
@@ -407,9 +526,12 @@ export function PowerQueryScreen() {
     } catch (error) {
       if (mountedRef.current) setQueryError(errorMessage(error, '查询失败，请稍后重试'))
     } finally {
-      if (mountedRef.current) setQueryLoading(false)
+      if (mountedRef.current) {
+        setQueryLoading(false)
+        setRefreshing(false)
+      }
     }
-  }, [campus, room, selectedBuilding, updateSelection])
+  }, [campus, refreshMonitorMeta, room, selectedBuilding, updateSelection])
 
   const handleSetMine = useCallback(async () => {
     if (!result) return
@@ -420,6 +542,7 @@ export function PowerQueryScreen() {
     }
     setMonitorBusy(true)
     setMonitorError(null)
+    setMonitorFeedback(null)
     try {
       const current = preferencesRef.current
       if (current.myRoom && !sameRoom(current.myRoom, target) && current.monitoringEnabled) {
@@ -435,8 +558,11 @@ export function PowerQueryScreen() {
       setHistory(localHistory)
       try {
         const pushToken = nextPreferences.notificationsEnabled ? await getRemotePushToken() : undefined
-        const serverHistory = await syncServerWatch(target, nextPreferences, pushToken || undefined)
-        if (mountedRef.current) setHistory(currentHistory => mergeHistory(currentHistory, serverHistory))
+        const remoteData = await syncServerWatch(target, nextPreferences, pushToken || undefined)
+        if (mountedRef.current) {
+          setServerStats(remoteData.stats)
+          setHistory(currentHistory => mergeHistory(currentHistory, asHistoryPoints(remoteData.items)))
+        }
       } catch {
         if (mountedRef.current) setMonitorError('服务器监控登记失败，将在下次打开应用时重试')
       }
@@ -451,11 +577,13 @@ export function PowerQueryScreen() {
     if (!preferencesRef.current.myRoom) return
     setMonitorBusy(true)
     setMonitorError(null)
+    setMonitorFeedback(null)
     try {
       await syncHourlyMonitor(false).catch(() => undefined)
+      await resetMonitorAlertLock()
       const token = mobileTokenRef.current || await getMobileInstallationToken()
       mobileTokenRef.current = token
-      await removeMobileWatch(token)
+      await removeMobileWatch(token).catch(() => undefined)
       await clearHistory()
       updatePreferences({
         myRoom: null,
@@ -463,6 +591,7 @@ export function PowerQueryScreen() {
         notificationsEnabled: false
       })
       setHistory([])
+      setServerStats(null)
     } catch (error) {
       if (mountedRef.current) setMonitorError(errorMessage(error, '取消我的寝室失败'))
     } finally {
@@ -471,21 +600,28 @@ export function PowerQueryScreen() {
   }, [updatePreferences])
 
   const handleThresholdChange = useCallback((value: number) => {
+    const safeThreshold = normalizeThreshold(value, preferencesRef.current.threshold)
     const nextPreferences = updatePreferences({
-      threshold: normalizeThreshold(value, preferencesRef.current.threshold)
+      threshold: safeThreshold
     })
+    setMonitorFeedback(null)
     if (!nextPreferences.myRoom) return
     const roomToUpdate = nextPreferences.myRoom
 
     void (async () => {
       try {
+        await resetMonitorAlertLock()
         const pushToken = nextPreferences.notificationsEnabled ? await getRemotePushToken() : undefined
         await syncServerWatch(roomToUpdate, nextPreferences, pushToken || undefined)
+        if (nextPreferences.monitoringEnabled) {
+          await runMonitorNow().catch(() => undefined)
+          await refreshMonitorMeta()
+        }
       } catch {
         if (mountedRef.current) setMonitorError('提醒阈值同步失败，将在下次打开应用时重试')
       }
     })()
-  }, [syncServerWatch, updatePreferences])
+  }, [refreshMonitorMeta, syncServerWatch, updatePreferences])
 
   const handleToggleMonitoring = useCallback(async () => {
     const roomToMonitor = preferencesRef.current.myRoom
@@ -494,6 +630,7 @@ export function PowerQueryScreen() {
     const wasEnabled = preferencesRef.current.monitoringEnabled
     setMonitorBusy(true)
     setMonitorError(null)
+    setMonitorFeedback(null)
     try {
       if (wasEnabled) {
         const nextPreferences = {
@@ -501,13 +638,15 @@ export function PowerQueryScreen() {
           monitoringEnabled: false,
           notificationsEnabled: false
         }
-        await syncServerWatch(roomToMonitor, nextPreferences)
+        await syncServerWatch(roomToMonitor, nextPreferences).catch(() => undefined)
         await syncHourlyMonitor(false).catch(() => undefined)
         updatePreferences({ monitoringEnabled: false, notificationsEnabled: false })
+        setMonitorFeedback('低电量提醒与后台守护已关闭')
       } else {
         const granted = await requestNotificationAccess()
         if (!granted) throw new Error('请允许通知权限后再开启提醒')
 
+        await resetMonitorAlertLock()
         const nextPreferences = {
           ...preferencesRef.current,
           monitoringEnabled: true,
@@ -515,13 +654,16 @@ export function PowerQueryScreen() {
         }
         const pushToken = await getRemotePushToken()
         await syncMobileDevice(pushToken).catch(() => undefined)
-        const serverHistory = await syncServerWatch(roomToMonitor, nextPreferences, pushToken || undefined)
+        const remoteData = await syncServerWatch(roomToMonitor, nextPreferences, pushToken || undefined)
         updatePreferences({ monitoringEnabled: true, notificationsEnabled: true })
         await persistenceQueue.current
-        await syncHourlyMonitor(true)
+        await syncHourlyMonitor(true).catch(() => undefined)
         const localHistory = await runMonitorNow()
+        await refreshMonitorMeta()
         if (mountedRef.current && sameRoom(preferencesRef.current.myRoom, roomToMonitor)) {
-          setHistory(current => mergeHistory(current, serverHistory, localHistory))
+          setServerStats(remoteData.stats)
+          setHistory(current => mergeHistory(current, asHistoryPoints(remoteData.items), localHistory))
+          setMonitorFeedback('守护已开启，低于阈值时将立即通知')
         }
       }
     } catch (error) {
@@ -533,7 +675,35 @@ export function PowerQueryScreen() {
     } finally {
       if (mountedRef.current) setMonitorBusy(false)
     }
-  }, [syncMobileDevice, syncServerWatch, updatePreferences])
+  }, [refreshMonitorMeta, syncMobileDevice, syncServerWatch, updatePreferences])
+
+  const handleToggleOngoing = useCallback(() => {
+    const nextVal = !preferencesRef.current.ongoingNotificationEnabled
+    updatePreferences({ ongoingNotificationEnabled: nextVal })
+    setMonitorFeedback(nextVal ? '已开启常驻通知栏电量卡片' : '已关闭常驻通知栏电量卡片')
+  }, [updatePreferences])
+
+  const handleTestNotification = useCallback(async () => {
+    setTestingNotification(true)
+    setMonitorError(null)
+    setMonitorFeedback(null)
+    try {
+      await sendTestNotification(
+        result?.displayName,
+        result?.kwh ?? analytics.summary.current,
+        preferencesRef.current.threshold
+      )
+      if (mountedRef.current) {
+        setMonitorFeedback('测试通知已发出，请查看手机顶部横幅或通知中心')
+      }
+    } catch (error) {
+      if (mountedRef.current) {
+        setMonitorError(errorMessage(error, '测试通知发送失败'))
+      }
+    } finally {
+      if (mountedRef.current) setTestingNotification(false)
+    }
+  }, [analytics.summary.current, result])
 
   const handleUpdateInstall = useCallback(async () => {
     if (!availableUpdate) return
@@ -555,7 +725,12 @@ export function PowerQueryScreen() {
     setUpdateError(null)
   }, [availableUpdate])
 
-  const showBuildingEmpty = !hydrating && !currentBuildingsLoading && !currentBuildingsError && currentBuildings.length === 0
+  const hasActiveDashboard = Boolean(result || isMine)
+  const roomPillLabel = useMemo(() => {
+    if (result?.displayName) return result.displayName.replace(/\s*·\s*/g, ' ')
+    if (building && room) return `${campus} ${building.label} ${room}`
+    return '选择寝室'
+  }, [building, campus, result, room])
 
   return (
     <SafeAreaView style={styles.safeArea}>
@@ -563,10 +738,38 @@ export function PowerQueryScreen() {
         contentContainerStyle={styles.scrollContent}
         keyboardShouldPersistTaps="handled"
         showsVerticalScrollIndicator={false}
+        refreshControl={
+          hasActiveDashboard ? (
+            <RefreshControl
+              refreshing={refreshing}
+              onRefresh={() => void runQuery(true)}
+              tintColor={colors.iosBlue}
+              colors={[colors.iosBlue]}
+            />
+          ) : undefined
+        }
       >
         <View style={styles.page}>
-          <View style={styles.hero}>
-            <Text style={styles.title}>华理宿舍电量查询</Text>
+          {/* Apple HIG 大标题顶栏与右侧寝室胶囊切换器 */}
+          <View style={styles.navBar}>
+            <View>
+              <Text style={styles.navTitle}>宿舍电量</Text>
+              <Text style={styles.navSubtitle}>
+                {isMine ? '我的寝室 · 整点自动采样与多维分析' : '华东理工大学电费实时查询'}
+              </Text>
+            </View>
+
+            <Pressable
+              onPress={() => setRoomSheetVisible(true)}
+              style={({ pressed }) => [styles.roomPill, pressed && styles.pressed]}
+              accessibilityRole="button"
+              accessibilityLabel={`当前寝室 ${roomPillLabel}，点击切换`}
+            >
+              <Text style={styles.roomPillText} numberOfLines={1}>
+                {roomPillLabel}
+              </Text>
+              <Text style={styles.roomPillChevron}>▾</Text>
+            </Pressable>
           </View>
 
           {availableUpdate ? (
@@ -579,29 +782,32 @@ export function PowerQueryScreen() {
             />
           ) : null}
 
-          <QueryCard
-            campus={campus}
-            building={building}
-            room={room}
-            buildingsLoading={currentBuildingsLoading}
-            buildingsError={currentBuildingsError}
-            queryLoading={queryLoading}
-            disabled={hydrating || queryLoading}
-            onCampusChange={handleCampusChange}
-            onOpenBuildingPicker={() => setPickerVisible(true)}
-            onRetryBuildings={() => void loadBuildings(campus, selectedBuilding)}
-            onRoomChange={handleRoomChange}
-            onQuery={() => void runQuery()}
-          />
-
           {hydrating ? (
             <View style={styles.bootstrapState}>
-              <ActivityIndicator color={colors.accent} />
-              <Text style={styles.bootstrapText}>正在恢复上次选择…</Text>
+              <ActivityIndicator color={colors.iosBlue} />
+              <Text style={styles.bootstrapText}>正在同步电量与历史趋势…</Text>
             </View>
           ) : null}
 
-          {!hydrating && currentBuildingsError ? (
+          {/* 首次打开且尚未查询或绑定寝室时，内联显示查询卡片 */}
+          {!hydrating && !hasActiveDashboard ? (
+            <QueryCard
+              campus={campus}
+              building={building}
+              room={room}
+              buildingsLoading={currentBuildingsLoading}
+              buildingsError={currentBuildingsError}
+              queryLoading={queryLoading}
+              disabled={hydrating || queryLoading}
+              onCampusChange={handleCampusChange}
+              onOpenBuildingPicker={() => setPickerVisible(true)}
+              onRetryBuildings={() => void loadBuildings(campus, selectedBuilding)}
+              onRoomChange={handleRoomChange}
+              onQuery={() => void runQuery(false)}
+            />
+          ) : null}
+
+          {!hydrating && currentBuildingsError && !hasActiveDashboard ? (
             <StateCard
               kind="error"
               title="楼栋加载失败"
@@ -610,46 +816,139 @@ export function PowerQueryScreen() {
             />
           ) : null}
 
-          {showBuildingEmpty ? (
-            <StateCard
-              kind="empty"
-              title="暂无可选楼栋"
-              message="当前校区暂时没有可用的楼栋数据，请稍后再试。"
-              onRetry={() => void loadBuildings(campus, selectedBuilding)}
-            />
-          ) : null}
-
-          {queryLoading ? (
-            <StateCard kind="loading" title="正在查询" message="正在获取最新电量，请稍候。" />
+          {queryLoading && !refreshing ? (
+            <StateCard kind="loading" title="正在查询" message="正在从学校电控系统获取最新度数…" />
           ) : queryError ? (
-            <StateCard kind="error" title="查询失败" message={queryError} onRetry={() => void runQuery()} />
-          ) : result ? (
-            <ResultCard
-              result={result}
-              isMine={isMine}
-              busy={monitorBusy}
-              onSetMine={() => void handleSetMine()}
-              onRemoveMine={() => void handleRemoveMine()}
+            <StateCard
+              kind="error"
+              title="查询失败"
+              message={queryError}
+              onRetry={() => void runQuery(false)}
             />
-          ) : !hydrating && !currentBuildingsLoading && !currentBuildingsError && currentBuildings.length > 0 && !isMine ? (
-            <StateCard kind="empty" title="还没有查询记录" message="选择楼栋并输入寝室号，查询当前剩余电量。" />
           ) : null}
 
-          {!hydrating && isMine ? (
+          {/* 核心数据仪表盘（一旦有查询结果或已绑定我的寝室即展示） */}
+          {!hydrating && hasActiveDashboard ? (
             <>
-              <MonitorCard
-                threshold={Math.max(MIN_THRESHOLD, Math.min(MAX_THRESHOLD, preferences.threshold))}
-                enabled={preferences.monitoringEnabled}
+              <HeroTelemetryCard
+                result={result}
+                summary={analytics.summary}
+                threshold={preferences.threshold}
+                isMine={isMine}
                 busy={monitorBusy}
-                error={monitorError}
-                onThresholdChange={handleThresholdChange}
-                onToggle={() => void handleToggleMonitoring()}
+                refreshing={refreshing || queryLoading}
+                onRefresh={() => void runQuery(true)}
+                onSetMine={() => void handleSetMine()}
+                onRemoveMine={() => void handleRemoveMine()}
+                onOpenRoomSwitcher={() => setRoomSheetVisible(true)}
               />
-              <TrendChart points={history} />
+
+              {!isMine ? (
+                <View style={styles.bindBanner}>
+                  <View style={styles.bindBannerTextWrap}>
+                    <Text style={styles.bindBannerTitle}>开启整点采样与分时图表</Text>
+                    <Text style={styles.bindBannerDesc}>
+                      点击上方「设为我的寝室」，即可解锁 24 小时每小时柱状图、14 天对比、7×24 热力图与离线低电量告警。
+                    </Text>
+                  </View>
+                  <Pressable
+                    onPress={() => void handleSetMine()}
+                    disabled={monitorBusy}
+                    style={({ pressed }) => [styles.bindBannerBtn, pressed && styles.pressed]}
+                  >
+                    <Text style={styles.bindBannerBtnText}>立即开启</Text>
+                  </Pressable>
+                </View>
+              ) : realAnalytics.summary.dailyAverage === null || demoPreviewEnabled ? (
+                <View style={[styles.bindBanner, demoPreviewEnabled && styles.demoBannerActive]}>
+                  <View style={styles.bindBannerTextWrap}>
+                    <Text style={[styles.bindBannerTitle, demoPreviewEnabled && styles.demoBannerTitleActive]}>
+                      {demoPreviewEnabled
+                        ? '正在预览 7 × 24h 多维图表效果'
+                        : `整点采样积累中（已采集 ${activeHistoryPoints.length} 次）`}
+                    </Text>
+                    <Text style={styles.bindBannerDesc}>
+                      {demoPreviewEnabled
+                        ? '当前展示以实测余量为基准的 7 天整点样本，供体验分时柱状图、热力矩阵与耗尽预测。'
+                        : '后续每个整点将自动汇入分时图表；您也可以先开启示例样本体验全量图表交互。'}
+                    </Text>
+                  </View>
+                  <Pressable
+                    onPress={() => setDemoPreviewEnabled(prev => !prev)}
+                    style={({ pressed }) => [
+                      styles.bindBannerBtn,
+                      demoPreviewEnabled && styles.demoBannerBtnActive,
+                      pressed && styles.pressed
+                    ]}
+                    accessibilityRole="button"
+                    accessibilityLabel={demoPreviewEnabled ? '切回实测数据' : '预览图表效果'}
+                  >
+                    <Text style={styles.bindBannerBtnText}>
+                      {demoPreviewEnabled ? '切回实测' : '预览效果'}
+                    </Text>
+                  </Pressable>
+                </View>
+              ) : null}
+
+              {/* 多维图表分析舱（24h分时柱状图 / 14天日耗柱状图 / 余量预测折线图） */}
+              <EnergyAnalyticsCard
+                points={effectiveHistoryPoints}
+                hourlyDays={analytics.hourlyDays}
+                dailyBars={analytics.dailyBars}
+                forecastPoints={analytics.forecastPoints}
+                dailyAverage={analytics.summary.dailyAverage}
+                threshold={preferences.threshold}
+              />
+
+              {/* 四时段占比结构条 + 7×24h 用电密度热力矩阵 */}
+              <PatternInsightsCard
+                periods={analytics.periods}
+                heatmap={analytics.heatmap}
+                rechargeCount={analytics.summary.rechargeCount}
+                lastRechargeAmount={analytics.summary.lastRechargeAmount}
+              />
+
+              {/* iOS 设置风格低电量通知与后台保活面板 */}
+              {isMine ? (
+                <MonitorCard
+                  threshold={Math.max(MIN_THRESHOLD, Math.min(MAX_THRESHOLD, preferences.threshold))}
+                  enabled={preferences.monitoringEnabled}
+                  ongoingEnabled={preferences.ongoingNotificationEnabled}
+                  thresholdEtaLabel={analytics.summary.thresholdEtaLabel}
+                  lastCheckedAt={lastCheckedAt}
+                  busy={monitorBusy}
+                  testingNotification={testingNotification}
+                  feedbackMessage={monitorFeedback}
+                  error={monitorError}
+                  onThresholdChange={handleThresholdChange}
+                  onToggle={() => void handleToggleMonitoring()}
+                  onToggleOngoing={handleToggleOngoing}
+                  onTestNotification={() => void handleTestNotification()}
+                  onOpenBatterySettings={() => void openBatteryOptimizationSettings()}
+                />
+              ) : null}
             </>
           ) : null}
         </View>
       </ScrollView>
+
+      {/* 顶部寝室胶囊触发的切换/查询抽屉 */}
+      <RoomSwitcherModal
+        visible={roomSheetVisible}
+        campus={campus}
+        building={building}
+        room={room}
+        buildingsLoading={currentBuildingsLoading}
+        buildingsError={currentBuildingsError}
+        queryLoading={queryLoading}
+        disabled={hydrating || queryLoading}
+        onClose={() => setRoomSheetVisible(false)}
+        onCampusChange={handleCampusChange}
+        onOpenBuildingPicker={() => setPickerVisible(true)}
+        onRetryBuildings={() => void loadBuildings(campus, selectedBuilding)}
+        onRoomChange={handleRoomChange}
+        onQuery={() => void runQuery(false)}
+      />
 
       <BuildingPickerModal
         visible={pickerVisible}
@@ -676,32 +975,109 @@ const styles = StyleSheet.create({
   },
   page: {
     flexGrow: 1,
-    paddingHorizontal: spacing.xl,
-    paddingBottom: 34
+    paddingHorizontal: spacing.lg,
+    paddingBottom: 38
   },
-  hero: {
-    paddingTop: 52,
-    paddingBottom: 22,
-    paddingHorizontal: spacing.xs
+  navBar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingTop: 44,
+    paddingBottom: 16,
+    paddingHorizontal: 2,
+    gap: spacing.sm
   },
-  title: {
+  navTitle: {
     color: colors.text,
-    fontSize: 29,
-    fontWeight: '800',
-    letterSpacing: -1.2
+    fontSize: 30,
+    fontWeight: '700',
+    letterSpacing: -0.9
+  },
+  navSubtitle: {
+    marginTop: 2,
+    color: colors.textMuted,
+    fontSize: 12
+  },
+  roomPill: {
+    maxWidth: '48%',
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: radii.pill,
+    backgroundColor: 'rgba(118, 118, 128, 0.12)'
+  },
+  roomPillText: {
+    flexShrink: 1,
+    color: colors.text,
+    fontSize: 12,
+    fontWeight: '600'
+  },
+  roomPillChevron: {
+    color: colors.textSecondary,
+    fontSize: 11,
+    fontWeight: '700'
   },
   bootstrapState: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    marginBottom: spacing.lg,
-    paddingVertical: 17,
-    borderRadius: radii.control + 6,
+    marginBottom: spacing.md,
+    paddingVertical: 18,
+    borderRadius: radii.card,
     backgroundColor: colors.surface
   },
   bootstrapText: {
     marginLeft: 10,
     color: colors.textSecondary,
     fontSize: 13
+  },
+  bindBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: spacing.md,
+    marginBottom: spacing.md,
+    padding: spacing.lg,
+    borderRadius: radii.card,
+    backgroundColor: colors.iosBlueSurface
+  },
+  bindBannerTextWrap: {
+    flex: 1
+  },
+  bindBannerTitle: {
+    color: colors.iosBlue,
+    fontSize: 14,
+    fontWeight: '700'
+  },
+  bindBannerDesc: {
+    marginTop: 2,
+    color: colors.textSecondary,
+    fontSize: 11,
+    lineHeight: 16
+  },
+  bindBannerBtn: {
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    borderRadius: radii.pill,
+    backgroundColor: colors.iosBlue
+  },
+  bindBannerBtnText: {
+    color: colors.surface,
+    fontSize: 12,
+    fontWeight: '600'
+  },
+  demoBannerActive: {
+    backgroundColor: colors.iosAmberSurface
+  },
+  demoBannerTitleActive: {
+    color: colors.iosAmberDark
+  },
+  demoBannerBtnActive: {
+    backgroundColor: colors.iosAmberDark
+  },
+  pressed: {
+    opacity: 0.68
   }
 })

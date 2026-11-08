@@ -1,0 +1,76 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024">
+  <defs>
+    <linearGradient id="bgGrad" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#1A1F28" />
+      <stop offset="100%" stop-color="#0D1016" />
+    </linearGradient>
+    <radialGradient id="ambientGlow" cx="50%" cy="50%" r="45%">
+      <stop offset="0%" stop-color="#30B0C7" stop-opacity="0.18" />
+      <stop offset="100%" stop-color="#30B0C7" stop-opacity="0" />
+    </radialGradient>
+    <linearGradient id="battGlass" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#1E232D" stop-opacity="0.92" />
+      <stop offset="100%" stop-color="#12151C" stop-opacity="0.92" />
+    </linearGradient>
+    <linearGradient id="barBlue" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#0A84FF" />
+      <stop offset="100%" stop-color="#0066DC" />
+    </linearGradient>
+    <linearGradient id="barTeal" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#30B0C7" />
+      <stop offset="100%" stop-color="#0088AA" />
+    </linearGradient>
+    <linearGradient id="barGreen" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#34C759" />
+      <stop offset="100%" stop-color="#22A644" />
+    </linearGradient>
+    <linearGradient id="barAmber" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#FFB340" />
+      <stop offset="100%" stop-color="#FF8A00" />
+    </linearGradient>
+    <clipPath id="squircleClip">
+      <rect x="41" y="41" width="942" height="942" rx="212" ry="212" />
+    </clipPath>
+  </defs>
+
+  <g clip-path="url(#squircleClip)">
+    <rect x="41" y="41" width="942" height="942" fill="url(#bgGrad)" />
+    <circle cx="512" cy="512" r="430" fill="url(#ambientGlow)" />
+
+    <!-- Subtle Apple HIG telemetry grid -->
+    <g stroke="#FFFFFF" stroke-opacity="0.055" stroke-width="2.5">
+      <line x1="41" y1="266" x2="983" y2="266" />
+      <line x1="41" y1="512" x2="983" y2="512" />
+      <line x1="41" y1="758" x2="983" y2="758" />
+      <line x1="266" y1="41" x2="266" y2="983" />
+      <line x1="512" y1="41" x2="512" y2="983" />
+      <line x1="758" y1="41" x2="758" y2="983" />
+    </g>
+
+    <!-- Battery Positive Terminal -->
+    <rect x="809" y="420" width="41" height="184" rx="20.5" fill="#EBEBF5" fill-opacity="0.57" />
+
+    <!-- Battery Capsule Frame -->
+    <rect x="174" y="261" width="614" height="502" rx="97" fill="url(#battGlass)" stroke="#F0F2F7" stroke-opacity="0.88" stroke-width="24.5" />
+
+    <!-- 4 Telemetry Bar Tracks -->
+    <g fill="#FFFFFF" fill-opacity="0.086">
+      <rect x="231" y="320" width="106.5" height="384" rx="32" />
+      <rect x="362" y="320" width="106.5" height="384" rx="32" />
+      <rect x="493" y="320" width="106.5" height="384" rx="32" />
+      <rect x="624" y="320" width="106.5" height="384" rx="32" />
+    </g>
+
+    <!-- 4 Ascending Hourly Telemetry Bars -->
+    <rect x="231" y="550" width="106.5" height="154" rx="32" fill="url(#barBlue)" />
+    <rect x="362" y="466" width="106.5" height="238" rx="32" fill="url(#barTeal)" />
+    <rect x="493" y="382" width="106.5" height="322" rx="32" fill="url(#barGreen)" />
+    <rect x="624" y="320" width="106.5" height="384" rx="32" fill="url(#barAmber)" />
+
+    <!-- Lightning Glyph in Bar 1 Upper Slot -->
+    <polygon points="291,356 249,412 282,412 275,460 319,403 286,403" fill="#FFFFFF" fill-opacity="0.96" />
+  </g>
+
+  <!-- Outer Specular Squircle Rim -->
+  <rect x="41" y="41" width="942" height="942" rx="212" ry="212" fill="none" stroke="#FFFFFF" stroke-opacity="0.16" stroke-width="7" />
+</svg>

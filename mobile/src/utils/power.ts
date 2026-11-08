@@ -7,10 +7,11 @@ export interface PowerStatus {
   label: string
 }
 
-export function getPowerStatus(kwh: number): PowerStatus {
-  if (kwh <= 5) return { tone: 'danger', label: '紧张' }
-  if (kwh <= 15) return { tone: 'warning', label: '偏低' }
-  return { tone: 'good', label: '充足' }
+export function getPowerStatus(kwh: number, threshold = 15): PowerStatus {
+  const safeThreshold = Number.isFinite(threshold) ? threshold : 15
+  if (kwh <= Math.min(5, safeThreshold * 0.5)) return { tone: 'danger', label: '急需充电' }
+  if (kwh <= safeThreshold) return { tone: 'warning', label: '低于阈值' }
+  return { tone: 'good', label: '余量充足' }
 }
 
 export function normalizeRoomInput(value: string): string {
@@ -31,6 +32,12 @@ export function formatUpdatedAt(value: string): string {
   return `${month}-${day} ${hour}:${minute}`
 }
 
+export function formatNumberCompact(value: number, maxDecimals = 2): string {
+  if (!Number.isFinite(value)) return '--'
+  if (Number.isInteger(value)) return String(value)
+  return value.toFixed(maxDecimals).replace(/0+$/, '').replace(/\.$/, '')
+}
+
 export function displayKwh(result: PowerResult): string {
-  return Number.isInteger(result.kwh) ? String(result.kwh) : result.kwh.toFixed(2).replace(/0+$/, '').replace(/\.$/, '')
+  return formatNumberCompact(result.kwh, 2)
 }

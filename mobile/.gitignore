@@ -23,3 +23,5 @@ env*.local
 npm-debug.*
 yarn-debug.*
 yarn-error.*
+releases/
+*.apk
